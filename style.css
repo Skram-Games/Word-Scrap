@@ -81,23 +81,43 @@
   .iconBtn svg{ width:19px; height:19px; }
   .iconBtn:active{ transform:scale(0.92); }
 
-  /* ---------- Level / target strip ---------- */
+  /* ---------- Level / target strip — styled as gauge patches on a
+     control panel rather than floating chips, per feedback that the old
+     chips just hovered over (and hid) the pile ---------- */
   #targetStrip{
-    position:absolute; top:64px; left:0; right:0;
-    display:flex; align-items:center; justify-content:center; gap:8px;
-    z-index:15; flex-wrap:wrap; padding:0 12px;
+    position:absolute; top:60px; left:8px; right:8px;
+    display:flex; align-items:stretch; justify-content:center; gap:6px;
+    z-index:15; flex-wrap:wrap; padding:8px 10px 10px;
     pointer-events:none;
+    background:
+      repeating-linear-gradient(90deg, rgba(0,0,0,0.12) 0 2px, transparent 2px 22px),
+      linear-gradient(180deg, #4a3a28, #382b1c);
+    border:2px solid #1c140c;
+    border-radius:12px;
+    box-shadow: inset 0 2px 4px rgba(255,255,255,0.06), inset 0 -3px 6px rgba(0,0,0,0.45), 0 5px 12px rgba(0,0,0,0.4);
   }
   .targetChip{
-    background:rgba(20,10,5,0.5);
-    border:1px solid rgba(240,169,78,0.3);
-    border-radius:14px; padding:4px 10px;
+    background:linear-gradient(180deg, #241a10, #17110a);
+    border:1px solid #0d0904;
+    border-radius:6px; padding:5px 9px 6px;
     font-size:12px; font-weight:700; letter-spacing:1px;
     text-transform:uppercase;
     display:flex; align-items:center; gap:6px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -2px 3px rgba(0,0,0,0.6), 0 1px 0 rgba(255,255,255,0.04);
+    position:relative;
   }
-  .targetChip.done{ background:rgba(95,179,95,0.35); border-color:var(--ok-glow); text-decoration:line-through; opacity:0.75; }
-  .targetChip .len{ opacity:0.7; font-weight:400; }
+  .targetChip::before{
+    /* a small unlit LED indicator, like a panel gauge waiting to trip */
+    content:""; width:6px; height:6px; border-radius:50%;
+    background:#5a3f22; box-shadow:0 0 3px rgba(240,169,78,0.15);
+    flex:none;
+  }
+  .targetChip.done{
+    background:linear-gradient(180deg, #1e3320, #142418);
+    border-color:#0a1a0c; text-decoration:line-through; opacity:0.8;
+  }
+  .targetChip.done::before{ background:var(--ok-glow); box-shadow:0 0 6px var(--ok-glow); }
+  .targetChip .len{ opacity:0.6; font-weight:400; color:var(--steel-300); }
 
   /* ---------- Conveyor / belt ---------- */
   #beltWrap{
