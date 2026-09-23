@@ -1,11 +1,46 @@
 /* tileTexture.js — procedural canvas textures for scrap-metal letter tiles.
-   No image assets: every tile face is drawn on an offscreen <canvas> once
-   per letter and cached, then reused as a THREE.CanvasTexture across every
-   tile mesh that needs it (26 textures total, not one per tile). */
+   No image assets: every tile face is drawn on an offscreen <canvas>, once
+   per (letter, variant, colourblind) combination, and cached as a
+   THREE.CanvasTexture reused across every tile mesh that needs it.
+
+   VARIANT is a "kind of scrap metal" (steel/copper/aluminum/rusted-iron/
+   chrome) chosen per tile at spawn time — this is what gives the pile
+   actual material variety instead of every tile being the same dull tan. */
 import * as THREE from "three";
 
 const SIZE = 256; // texture resolution per face
 const cache = new Map();
+
+export const TILE_VARIANTS = { STEEL: 0, COPPER: 1, ALUMINUM: 2, RUSTED_IRON: 3, CHROME: 4 };
+
+const PALETTES = {
+  0: { // steel — the original default look
+    grad: ["#8f7863", "#6f5b45", "#4d3d2c"], gradCB: ["#a8927a", "#8d795f", "#6f5d47"],
+    rust: "#9a5a2c", rustDark: "#5c3416", rustCB: "#c98a3c", rustDarkCB: "#7a5220",
+    rustAmount: 1, metalness: 0.25, roughness: 0.62
+  },
+  1: { // copper — warm orange-pink, greenish oxidation instead of rust
+    grad: ["#b97a4a", "#8a4f2e", "#5f331c"], gradCB: ["#cf9a68", "#a06a3e", "#754824"],
+    rust: "#4f7a5c", rustDark: "#2c4a35", rustCB: "#6fa382", rustDarkCB: "#3f6a4d",
+    rustAmount: 0.7, metalness: 0.55, roughness: 0.5
+  },
+  2: { // aluminum — cool grey, brushed, minimal rust (just dark grime)
+    grad: ["#c3c7c9", "#9aa0a4", "#6f7679"], gradCB: ["#cdd1d3", "#a6acaf", "#7a8083"],
+    rust: "#5a5f61", rustDark: "#33383a", rustCB: "#6a7073", rustDarkCB: "#454a4c",
+    rustAmount: 0.35, metalness: 0.65, roughness: 0.4
+  },
+  3: { // rusted iron — the "worst condition" tile, heavier corrosion
+    grad: ["#7a5638", "#5a3a22", "#3a2415"], gradCB: ["#8e6a48", "#6e4c2e", "#4a3020"],
+    rust: "#a35a24", rustDark: "#6b3812", rustCB: "#c98a3c", rustDarkCB: "#8a5420",
+    rustAmount: 1.5, metalness: 0.1, roughness: 0.88
+  },
+  4: { // chrome/gold — rare, shiny, mostly clean, sparkle streaks
+    grad: ["#f0d68a", "#c9a24a", "#93722c"], gradCB: ["#f5e2ab", "#d6b566", "#a3823c"],
+    rust: "#8a6a2a", rustDark: "#5c4418", rustCB: "#a3823c", rustDarkCB: "#75581f",
+    rustAmount: 0.15, metalness: 0.92, roughness: 0.16, sparkle: true
+  }
+};
+function palette(variant) { return PALETTES[variant] || PALETTES[0]; }
 
 // Deterministic pseudo-random per letter so each letter's rust speckle
 // pattern is stable across a session instead of re-randomizing every spawn.
@@ -19,27 +54,27 @@ function seededRand(seed) {
   };
 }
 
-function drawTileFace(ctx, letter, colourblindSafe) {
+function drawTileFace(ctx, letter, colourblindSafe, variant) {
   const s = SIZE;
-  const rand = seededRand(letter.charCodeAt(0) * 7919);
+  // seed mixes the letter AND a variant-only term so different metal kinds
+  // of the same letter don't share an identical speckle pattern
+  const rand = seededRand(letter.charCodeAt(0) * 7919 + variant * 104729);
+  const pal = palette(variant);
 
   // base metal gradient — patchier than a clean brushed sheet, like an
   // offcut that's been sitting outdoors
+  const stops = colourblindSafe ? pal.gradCB : pal.grad;
   const grad = ctx.createLinearGradient(0, 0, s, s);
-  if (colourblindSafe) {
-    grad.addColorStop(0, "#a8927a");
-    grad.addColorStop(0.55, "#8d795f");
-    grad.addColorStop(1, "#6f5d47");
-  } else {
-    grad.addColorStop(0, "#8f7863");
-    grad.addColorStop(0.5, "#6f5b45");
-    grad.addColorStop(1, "#4d3d2c");
-  }
+  grad.addColorStop(0, stops[0]);
+  grad.addColorStop(0.5, stops[1]);
+  grad.addColorStop(1, stops[2]);
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, s, s);
 
-  // low-frequency grime blotches (patchy discolouration, not just noise)
-  for (let i = 0; i < 6; i++) {
+  // low-frequency grime blotches (patchy discolouration, not just noise) —
+  // scaled down for the shinier variants, which stay cleaner
+  const grimeCount = Math.round(6 * Math.min(1, pal.rustAmount + 0.3));
+  for (let i = 0; i < grimeCount; i++) {
     ctx.globalAlpha = 0.08 + rand() * 0.1;
     ctx.fillStyle = rand() > 0.5 ? "#1a120a" : "#3a2a18";
     const gx = rand() * s, gy = rand() * s, gr = 30 + rand() * 60;
@@ -76,11 +111,14 @@ function drawTileFace(ctx, letter, colourblindSafe) {
   }
   ctx.globalAlpha = 1;
 
-  // rust speckle + blotches — heavier, more saturated, with a darker core
-  // per blotch so it reads as corrosion, not just tint
-  const rustColour = colourblindSafe ? "#c98a3c" : "#9a5a2c";
-  const rustDark = colourblindSafe ? "#7a5220" : "#5c3416";
-  for (let i = 0; i < 34; i++) {
+  // rust/oxidation speckle + blotches — heavier, more saturated, with a
+  // darker core per blotch so it reads as corrosion, not just tint. Amount
+  // and colour both come from the variant palette (copper oxidises green,
+  // aluminum barely rusts at all, chrome almost never does).
+  const rustColour = colourblindSafe ? pal.rustCB : pal.rust;
+  const rustDark = colourblindSafe ? pal.rustDarkCB : pal.rustDark;
+  const rustCount = Math.round(34 * pal.rustAmount);
+  for (let i = 0; i < rustCount; i++) {
     const rx = rand() * s, ry = rand() * s, r = 4 + rand() * 16;
     ctx.globalAlpha = 0.14 + rand() * 0.2;
     ctx.fillStyle = rustColour;
@@ -96,6 +134,22 @@ function drawTileFace(ctx, letter, colourblindSafe) {
     }
   }
   ctx.globalAlpha = 1;
+
+  // chrome/gold sparkle — a handful of bright diagonal glints, the tell
+  // that marks this tile as the rare shiny one in the pile
+  if (pal.sparkle) {
+    for (let i = 0; i < 5; i++) {
+      ctx.globalAlpha = 0.4 + rand() * 0.4;
+      ctx.strokeStyle = "#fff8e0";
+      ctx.lineWidth = 2 + rand() * 2;
+      const x0 = rand() * s, y0 = rand() * s, len = 20 + rand() * 30;
+      ctx.beginPath();
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(x0 + len, y0 + len * 0.3);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
 
   // a torn/chipped hazard-paint corner — small, junkyard-signage flavour,
   // varies which corner per letter so tiles don't look stamped from a mould
@@ -117,7 +171,7 @@ function drawTileFace(ctx, letter, colourblindSafe) {
     }
     ctx.restore();
     ctx.globalAlpha = 0.55; // let the grime/rust show through — chipped, not fresh paint
-    ctx.fillStyle = colourblindSafe ? "#8d795f" : "#6f5b45";
+    ctx.fillStyle = stops[1];
     for (let i = 0; i < 5; i++) {
       const px = cx + (rand() - 0.5) * 60 * (cx === 0 ? 1 : -1);
       const py = cy + (rand() - 0.5) * 60 * (cy === 0 ? 1 : -1);
@@ -191,19 +245,25 @@ function drawTileFace(ctx, letter, colourblindSafe) {
   ctx.restore();
 }
 
-export function getLetterTexture(letter, colourblindSafe) {
-  const key = letter + (colourblindSafe ? ":cb" : "");
+export function getLetterTexture(letter, colourblindSafe, variant) {
+  const v = variant == null ? TILE_VARIANTS.STEEL : variant;
+  const key = letter + ":" + v + (colourblindSafe ? ":cb" : "");
   if (cache.has(key)) return cache.get(key);
   const canvas = document.createElement("canvas");
   canvas.width = SIZE;
   canvas.height = SIZE;
   const ctx = canvas.getContext("2d");
-  drawTileFace(ctx, letter, colourblindSafe);
+  drawTileFace(ctx, letter, colourblindSafe, v);
   const tex = new THREE.CanvasTexture(canvas);
   tex.anisotropy = 4;
   tex.needsUpdate = true;
   cache.set(key, tex);
   return tex;
+}
+
+export function tileMaterialProps(variant) {
+  const pal = palette(variant == null ? TILE_VARIANTS.STEEL : variant);
+  return { metalness: pal.metalness, roughness: pal.roughness, isSparkly: !!pal.sparkle };
 }
 
 export function clearTextureCache() {

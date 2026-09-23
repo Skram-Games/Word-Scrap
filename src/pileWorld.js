@@ -127,13 +127,18 @@ export class PileWorld {
 
   /**
    * Spawns a physical tile with the given letter and returns a plain entity
-   * object: { letter, mesh, body, collider, held, onBelt, hint }.
+   * object: { letter, mesh, body, collider, held, onBelt, hint, variant }.
+   * `variant` picks a metal "kind" (see tileTexture.js's TILE_VARIANTS) —
+   * omit it for the plain default (steel) look; `materialProps`, if passed,
+   * is the {metalness, roughness} pair for that variant (tileTexture.js's
+   * tileMaterialProps()) so tin/copper/chrome etc. actually look different,
+   * not just differently coloured.
    */
-  spawnTile(letter, pos, getLetterTexture, initialVel) {
+  spawnTile(letter, pos, getLetterTexture, initialVel, variant, materialProps) {
     const { THREE, RAPIER, world } = this;
-    const tex = getLetterTexture(letter, this.colourblindSafe);
-    const sideMat = new THREE.MeshStandardMaterial({ color: 0x5a4a38, roughness: 0.75, metalness: 0.3 });
-    const faceMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.6, metalness: 0.25 });
+    const tex = getLetterTexture(letter, this.colourblindSafe, variant);
+    const mp = materialProps || { metalness: 0.25, roughness: 0.6 };
+    const faceMat = new THREE.MeshStandardMaterial({ map: tex, roughness: mp.roughness, metalness: mp.metalness });
     // Box material order in three.js: +x,-x,+y,-y,+z,-z. Letter on every
     // face so it's always readable regardless of which way the tile lands.
     const materials = [faceMat, faceMat, faceMat, faceMat, faceMat, faceMat];
@@ -157,7 +162,7 @@ export class PileWorld {
     if (initialVel) body.setLinvel(initialVel, true);
     body.setAngvel({ x: (Math.random() - 0.5) * 4, y: (Math.random() - 0.5) * 4, z: (Math.random() - 0.5) * 4 }, true);
 
-    const entity = { letter, mesh, body, collider, held: false, onBelt: false, hint: false, id: Math.random() };
+    const entity = { letter, mesh, body, collider, held: false, onBelt: false, hint: false, variant, id: Math.random() };
     mesh.userData.entity = entity;
     this.entities.push(entity);
     return entity;

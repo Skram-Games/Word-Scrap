@@ -20,7 +20,7 @@ const bootSpinner = document.querySelector(".bootSpinner");
 const bootError = document.getElementById("bootError");
 const bootErrorDetail = document.getElementById("bootErrorDetail");
 
-let THREE, RAPIER, getLetterTexture, PileWorld;
+let THREE, RAPIER, getLetterTexture, PileWorld, TILE_VARIANTS, tileMaterialProps;
 
 async function loadEngine() {
   bootLabel.textContent = "Loading 3D engine…";
@@ -32,7 +32,10 @@ async function loadEngine() {
   await RAPIER.init();
 
   bootLabel.textContent = "Building world…";
-  ({ getLetterTexture } = await import("./tileTexture.js"));
+  const tileTextureMod = await import("./tileTexture.js");
+  getLetterTexture = tileTextureMod.getLetterTexture;
+  TILE_VARIANTS = tileTextureMod.TILE_VARIANTS;
+  tileMaterialProps = tileTextureMod.tileMaterialProps;
   ({ PileWorld } = await import("./pileWorld.js"));
 
   if (!window.WS_TIER1 || !window.WS_TIER2) {
@@ -154,7 +157,10 @@ function levelConfig(level, startDiff) {
   // still in the mix even once the game is asking for longer ones too.
   const minLen = clamp(3 + Math.floor((L - 1) / 4), 3, 6);
   const maxLen = clamp(5 + Math.floor((L - 1) / 3), 5, 9);
-  const pileSize = clamp(10 + L * 2, 10, 32);
+  // Higher baseline than the 2D version's — the 3D pit reads as empty at
+  // low tile counts in a way a flat 2D pile didn't. This is the STARTING
+  // count; spawnDripTile() keeps topping it up during play too.
+  const pileSize = clamp(18 + L * 2, 18, 34);
   const badWeldDamage = clamp(14 + Math.floor(L / 3) * 2, 14, 26);
   const timerSeconds = L >= 4 ? clamp(70 - L * 2, 30, 70) : null;
   const magnetsAwarded = level === 1 ? 3 : (level % 3 === 0 ? 1 : 0);
@@ -177,11 +183,11 @@ function chooseTargetWords(rng, cfg) {
   }
   return targets;
 }
+const LETTER_FREQ = "EEEEEEEEEAAAAAAAARRRRRRRIIIIIIIOOOOOOOTTTTTTTNNNNNNSSSSSSLLLLLCCCCUUUUDDDDPPPMMMHHHGGBBFFYYWWKVXZJQ";
 function buildPileLetters(rng, cfg, targetWords) {
-  const FREQ = "EEEEEEEEEAAAAAAAARRRRRRRIIIIIIIOOOOOOOTTTTTTTNNNNNNSSSSSSLLLLLCCCCUUUUDDDDPPPMMMHHHGGBBFFYYWWKVXZJQ";
   const letters = [];
   targetWords.forEach((w) => letters.push(...w.split("")));
-  while (letters.length < cfg.pileSize) letters.push(FREQ[Math.floor(rng() * FREQ.length)]);
+  while (letters.length < cfg.pileSize) letters.push(LETTER_FREQ[Math.floor(rng() * LETTER_FREQ.length)]);
   return shuffle(rng, letters).slice(0, Math.max(cfg.pileSize, letters.length));
 }
 
@@ -218,7 +224,7 @@ const canvas = document.getElementById("glCanvas");
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xc97a3f);
-scene.fog = new THREE.Fog(0xc97a3f, 9, 24);
+scene.fog = new THREE.Fog(0xc97a3f, 10, 27);
 
 const camera = new THREE.PerspectiveCamera(46, 1, 0.1, 100);
 // Pulled back and raised from the first pass — too close meant the target
@@ -245,6 +251,152 @@ scene.add(dirLight);
 const fillLight = new THREE.DirectionalLight(0x88aaff, 0.22);
 fillLight.position.set(-5, 3, -4);
 scene.add(fillLight);
+
+// A focused spot aimed straight down into the pit — the pile's middle was
+// reading flat under just the two directional lights, "a bowl of cereal"
+// as described. This gives the tiles real shadow/depth in the center.
+const pitSpot = new THREE.SpotLight(0xffe3b0, 2.2, 15, Math.PI / 4.2, 0.55, 1.3);
+pitSpot.position.set(0.4, 7.2, 1.8);
+pitSpot.target.position.set(0, 0.1, 0);
+scene.add(pitSpot);
+scene.add(pitSpot.target);
+
+/* ---------------------------- Junkyard backdrop ---------------------------
+   A single billboard plane behind the pit with a painted silhouette skyline
+   (crane, stacked car husks, a fence line) so the background reads as a
+   place, not a flat colour field. Cheap — one extra draw call, no new
+   dependency, no risk to the physics/boot sequence. */
+function buildSkylineBackdrop() {
+  const w = 1024, h = 420;
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  const bctx = c.getContext("2d");
+  const sky = bctx.createLinearGradient(0, 0, 0, h);
+  sky.addColorStop(0, "#e8ad63"); sky.addColorStop(0.55, "#c97a3f"); sky.addColorStop(1, "#a35a30");
+  bctx.fillStyle = sky; bctx.fillRect(0, 0, w, h);
+
+  bctx.fillStyle = "rgba(30,16,8,0.55)";
+  // distant hazy hill line
+  bctx.beginPath(); bctx.moveTo(0, h * 0.62);
+  for (let x = 0; x <= w; x += 40) bctx.lineTo(x, h * 0.62 - Math.sin(x * 0.01) * 14 - 6);
+  bctx.lineTo(w, h); bctx.lineTo(0, h); bctx.closePath(); bctx.fill();
+
+  // stacked crushed-car silhouettes
+  bctx.fillStyle = "rgba(15,8,4,0.72)";
+  const stackX = [90, 250, 430, 700, 860];
+  stackX.forEach((sx, i) => {
+    const blocks = 2 + (i % 3);
+    for (let b = 0; b < blocks; b++) {
+      const bw = 70 + (b % 2) * 10, bh = 34;
+      bctx.fillRect(sx - bw / 2, h * 0.62 - (b + 1) * bh, bw, bh - 3);
+    }
+  });
+
+  // a crane silhouette
+  bctx.strokeStyle = "rgba(15,8,4,0.8)"; bctx.lineWidth = 6; bctx.lineCap = "round";
+  bctx.beginPath();
+  bctx.moveTo(600, h * 0.62); bctx.lineTo(600, h * 0.2);
+  bctx.lineTo(760, h * 0.24);
+  bctx.moveTo(600, h * 0.34); bctx.lineTo(690, h * 0.3);
+  bctx.stroke();
+  bctx.fillStyle = "rgba(15,8,4,0.8)";
+  bctx.beginPath(); bctx.moveTo(748, h * 0.24); bctx.lineTo(742, h * 0.36); bctx.lineTo(756, h * 0.36); bctx.closePath(); bctx.fill();
+
+  // chain-link fence line across the foreground
+  bctx.strokeStyle = "rgba(20,12,6,0.35)"; bctx.lineWidth = 1.5;
+  for (let x = -20; x < w + 40; x += 26) { bctx.beginPath(); bctx.moveTo(x, h * 0.6); bctx.lineTo(x + 40, h * 0.72); bctx.stroke(); }
+
+  const tex = new THREE.CanvasTexture(c);
+  const mat = new THREE.MeshBasicMaterial({ map: tex, fog: true });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(30, 12.3), mat);
+  mesh.position.set(0, 4.6, -12.5);
+  scene.add(mesh);
+}
+buildSkylineBackdrop();
+
+/* ---------------------------- Ambient dust motes ---------------------------
+   A light drifting particle field for atmosphere — no interaction, just
+   life in the scene so it never looks static. */
+function buildDustField() {
+  const COUNT = 90;
+  const dotCanvas = document.createElement("canvas");
+  dotCanvas.width = 16; dotCanvas.height = 16;
+  const dctx = dotCanvas.getContext("2d");
+  const g = dctx.createRadialGradient(8, 8, 0, 8, 8, 8);
+  g.addColorStop(0, "rgba(255,232,190,0.9)"); g.addColorStop(1, "rgba(255,232,190,0)");
+  dctx.fillStyle = g; dctx.fillRect(0, 0, 16, 16);
+  const dotTex = new THREE.CanvasTexture(dotCanvas);
+
+  const positions = new Float32Array(COUNT * 3);
+  const speeds = new Float32Array(COUNT);
+  for (let i = 0; i < COUNT; i++) {
+    positions[i * 3] = (Math.random() - 0.5) * 9;
+    positions[i * 3 + 1] = Math.random() * 6;
+    positions[i * 3 + 2] = (Math.random() - 0.5) * 9;
+    speeds[i] = 0.15 + Math.random() * 0.35;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const mat = new THREE.PointsMaterial({ map: dotTex, size: 0.09, transparent: true, opacity: 0.55, depthWrite: false });
+  const points = new THREE.Points(geo, mat);
+  scene.add(points);
+  return { points, positions, speeds, count: COUNT };
+}
+const dustField = buildDustField();
+
+/* ---------------------------- Weld spark burst ----------------------------
+   A quick expanding/fading burst of points at a successful weld, so the
+   reward lands in the 3D scene instead of only ever showing up as a DOM
+   toast bolted on top of it. Fired-and-forgotten: each burst removes
+   itself from the scene once its lifetime is up. */
+const WELD_FX_POINT = new THREE.Vector3(0, 0.9, 2.1); // roughly where the belt overlay sits, front of the pit
+const activeBursts = [];
+function spawnWeldBurst() {
+  const n = 22;
+  const positions = new Float32Array(n * 3);
+  const velocities = [];
+  for (let i = 0; i < n; i++) {
+    positions[i * 3] = WELD_FX_POINT.x; positions[i * 3 + 1] = WELD_FX_POINT.y; positions[i * 3 + 2] = WELD_FX_POINT.z;
+    const ang = Math.random() * Math.PI * 2, spd = 1.2 + Math.random() * 2.2;
+    velocities.push({ x: Math.cos(ang) * spd, y: 1.5 + Math.random() * 2, z: Math.sin(ang) * spd });
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const mat = new THREE.PointsMaterial({ color: 0xffcf7a, size: 0.11, transparent: true, opacity: 1, depthWrite: false });
+  const points = new THREE.Points(geo, mat);
+  scene.add(points);
+  activeBursts.push({ points, velocities, age: 0, life: 0.6 });
+}
+function updateWeldBursts(dt) {
+  for (let i = activeBursts.length - 1; i >= 0; i--) {
+    const b = activeBursts[i];
+    b.age += dt;
+    const pos = b.points.geometry.attributes.position;
+    for (let j = 0; j < b.velocities.length; j++) {
+      const v = b.velocities[j];
+      v.y -= 3.5 * dt;
+      pos.setX(j, pos.getX(j) + v.x * dt);
+      pos.setY(j, pos.getY(j) + v.y * dt);
+      pos.setZ(j, pos.getZ(j) + v.z * dt);
+    }
+    pos.needsUpdate = true;
+    b.points.material.opacity = Math.max(0, 1 - b.age / b.life);
+    if (b.age >= b.life) {
+      scene.remove(b.points);
+      b.points.geometry.dispose(); b.points.material.dispose();
+      activeBursts.splice(i, 1);
+    }
+  }
+}
+function updateDustField(dt) {
+  const pos = dustField.points.geometry.attributes.position;
+  for (let i = 0; i < dustField.count; i++) {
+    let y = pos.getY(i) + dustField.speeds[i] * dt;
+    if (y > 6) y = 0;
+    pos.setY(i, y);
+    pos.setX(i, pos.getX(i) + Math.sin(y * 2 + i) * dt * 0.05);
+  }
+  pos.needsUpdate = true;
+}
 
 const pileWorld = new PileWorld(THREE, RAPIER, scene, {
   radius: 3.0, wallHeight: 2.3, colourblindSafe: SAVE.settings.colourblind
@@ -287,11 +439,22 @@ function buildFeedConveyor() {
     group.add(leg);
   });
 
-  group.position.set(-0.4, 3.1, -3.6);
-  group.rotation.x = -0.55; // tips down toward the pit
-  group.rotation.y = 0.12;
+  // Pulled forward/down from the first pass, where only the support legs
+  // ended up in frame — the belt bed itself needs to actually be visible,
+  // tipping down into the pit, for the "conveyor feeding the pit" read.
+  group.position.set(-0.3, 2.55, -2.1);
+  group.rotation.x = -0.62; // tips down toward the pit
+  group.rotation.y = 0.1;
   scene.add(group);
-  return { group, beltSurface, stripeTex };
+
+  // World-space position of the belt's low (downhill) end — new filler
+  // tiles spawn from here so they visibly tumble off the belt into the
+  // pile instead of just appearing out of nowhere.
+  group.updateMatrixWorld(true);
+  const worldDrop = new THREE.Vector3(0, 0.12, bedLen * 0.42);
+  group.localToWorld(worldDrop);
+
+  return { group, beltSurface, stripeTex, dropPoint: worldDrop };
 }
 const feedConveyor = buildFeedConveyor();
 
@@ -354,9 +517,20 @@ function setHintVisual(entity, on) {
   });
 }
 function retextureEntity(entity) {
-  const tex = getLetterTexture(entity.letter, pileWorld.colourblindSafe);
+  const tex = getLetterTexture(entity.letter, pileWorld.colourblindSafe, entity.variant);
   const mats = Array.isArray(entity.mesh.material) ? entity.mesh.material : [entity.mesh.material];
   mats.forEach((m) => { m.map = tex; m.needsUpdate = true; });
+}
+// Weighted pick of a "kind of scrap metal" for a newly-spawned tile —
+// mostly ordinary steel/copper/aluminum/rusted-iron, with a rare (5%)
+// chrome/gold tile as a little visual treat to notice in the pile.
+function pickTileVariant() {
+  const r = Math.random();
+  if (r < 0.05) return TILE_VARIANTS.CHROME;
+  if (r < 0.30) return TILE_VARIANTS.RUSTED_IRON;
+  if (r < 0.55) return TILE_VARIANTS.ALUMINUM;
+  if (r < 0.78) return TILE_VARIANTS.COPPER;
+  return TILE_VARIANTS.STEEL;
 }
 function applyColourblindSetting() {
   pileWorld.colourblindSafe = SAVE.settings.colourblind;
@@ -379,6 +553,13 @@ function Game() {
   this.beltSlotCount = 8;
   this.timeLeft = null;
   this.shakeT = 0;
+  // Sieve mechanic: a slow, continuous drip of filler tiles off the
+  // conveyor into the pile, mostly irrelevant letters so there's always
+  // something to dig through rather than the pit draining down to just
+  // the letters you need.
+  this.dripAccum = 0;
+  this.dripInterval = 2 + Math.random() * 1.5;
+  this.fillerCap = 24;
 }
 Game.prototype.startHaul = function (level, mode) {
   this.mode = mode || "haul";
@@ -395,6 +576,9 @@ Game.prototype.startHaul = function (level, mode) {
   this.magnets = (this.magnets || 0) + this.cfg.magnetsAwarded;
   if (this.level === 1 && this.mode === "haul") this.magnets = this.cfg.magnetsAwarded;
   this.timeLeft = this.cfg.timerSeconds;
+  this.fillerCap = clamp(this.cfg.pileSize + 14, 24, 46);
+  this.dripAccum = 0;
+  this.dripInterval = 1.8 + Math.random() * 1.6;
 
   // clear last level's tiles out of the physics world before spawning new ones
   pileWorld.entities.slice().forEach((e) => pileWorld.removeTile(e));
@@ -403,7 +587,8 @@ Game.prototype.startHaul = function (level, mode) {
   letters.forEach((L) => {
     const p = pileWorld.randomDropPoint(this.rng);
     const vel = { x: (this.rng() - 0.5) * 1.5, y: -1 - this.rng(), z: (this.rng() - 0.5) * 1.5 };
-    pileWorld.spawnTile(L, p, getLetterTexture, vel);
+    const variant = pickTileVariant();
+    pileWorld.spawnTile(L, p, getLetterTexture, vel, variant, tileMaterialProps(variant));
   });
 
   this.applyHints();
@@ -430,6 +615,34 @@ Game.prototype.tick = function (dt) {
     this.timeLeft -= dt;
     if (this.timeLeft <= 0) { this.timeLeft = 0; this.damageIntegrity(8, true); this.resetSoftTimer(); }
   }
+  this.dripAccum += dt;
+  if (this.dripAccum >= this.dripInterval) {
+    this.dripAccum = 0;
+    this.dripInterval = 1.8 + Math.random() * 1.6;
+    this.spawnDripTile();
+  }
+};
+Game.prototype.spawnDripTile = function () {
+  const alive = pileWorld.entities.filter((e) => !e.onBelt).length;
+  if (alive >= this.fillerCap) return;
+  let letter;
+  if (Math.random() < 0.15) {
+    // Mostly noise, but not ONLY noise — every so often the belt drops
+    // something you actually need, so digging through the junk pays off
+    // rather than the drip just diluting the pile forever.
+    const need = {};
+    this.targets.filter((t) => !t.done).forEach((t) => t.word.split("").forEach((ch) => (need[ch] = (need[ch] || 0) + 1)));
+    const needed = Object.keys(need).filter((ch) => need[ch] > 0);
+    letter = needed.length ? needed[Math.floor(Math.random() * needed.length)] : LETTER_FREQ[Math.floor(Math.random() * LETTER_FREQ.length)];
+  } else {
+    letter = LETTER_FREQ[Math.floor(Math.random() * LETTER_FREQ.length)];
+  }
+  const drop = feedConveyor.dropPoint;
+  const p = { x: drop.x + (Math.random() - 0.5) * 0.5, y: drop.y, z: drop.z + (Math.random() - 0.5) * 0.3 };
+  const vel = { x: (Math.random() - 0.5) * 0.5, y: -0.6, z: -1.6 - Math.random() * 0.6 }; // tumbling off the belt, downhill into the pit
+  const variant = pickTileVariant();
+  pileWorld.spawnTile(letter, p, getLetterTexture, vel, variant, tileMaterialProps(variant));
+  this.applyHints();
 };
 Game.prototype.resetSoftTimer = function () { this.timeLeft = this.cfg.timerSeconds; };
 Game.prototype.damageIntegrity = function (amount) {
@@ -481,6 +694,10 @@ Game.prototype.clearBelt = function () {
 };
 Game.prototype.attemptWeld = function () {
   const word = this.currentBeltWord();
+  // An empty belt isn't a failed attempt, it's a non-attempt — no sound, no
+  // toast, no integrity hit. (Previously this fell through to weldFail and
+  // let the player grind their own integrity down by mashing an empty Weld.)
+  if (word.length === 0) return;
   if (word.length < 3) { this.weldFail(pickFailMessage(TOO_SHORT_MESSAGES)); return; }
   const targetMatch = this.targets.find((t) => !t.done && t.word === word);
   const isValid = ALL_WORDS.has(word);
@@ -491,6 +708,7 @@ Game.prototype.attemptWeld = function () {
     const comboBonus = Math.floor(base * 0.2 * (this.combo - 1));
     this.score += base + comboBonus;
     Sound.weldGood();
+    spawnWeldBurst();
     showToast("WELDED!", "#9dffb0");
     if (comboBonus > 0) floatCombo(`+${this.combo} COMBO`);
     this.consumeBeltTiles();
@@ -502,6 +720,7 @@ Game.prototype.attemptWeld = function () {
     const base = 4 * word.length;
     this.score += base;
     Sound.weldGood();
+    spawnWeldBurst();
     showToast("NICE SALVAGE", "#f0a94e");
     this.consumeBeltTiles();
     updateHUD(this);
@@ -572,12 +791,16 @@ let game = new Game();
 
 /* ---------------------------- Input handling (pointer events) ----------- */
 let dragEntity = null, dragPlaneY = 1;
+let lastInteractionAt = performance.now();
+let lastIdleShakeAt = 0;
+function markInteraction() { lastInteractionAt = performance.now(); }
 function onPointerDown(e) {
   if (game.state !== "playing") return;
   const n = toNDC(e.clientX, e.clientY);
   const entity = pileWorld.raycastPick(n, camera, raycaster);
   if (entity) {
     e.preventDefault();
+    markInteraction();
     dragEntity = entity;
     dragPlaneY = entity.mesh.position.y;
     game.pickupFromPile(entity);
@@ -617,7 +840,7 @@ document.getElementById("belt").addEventListener("click", (e) => {
   if (!slotEl) return;
   const idx = parseInt(slotEl.dataset.idx, 10);
   const entity = game.belt[idx];
-  if (entity) { Sound.click(); game.returnToPile(entity); }
+  if (entity) { markInteraction(); Sound.click(); game.returnToPile(entity); }
 });
 
 /* ---------------------------- UI renderers ------------------------------ */
@@ -700,6 +923,7 @@ function onDeviceMotion(e) {
     if (delta > SHAKE_THRESHOLD && now - lastShakeAt > SHAKE_COOLDOWN_MS) {
       lastShakeAt = now;
       if (game.state === "playing") {
+        markInteraction();
         pileWorld.shakePile(1);
         Sound.magnet();
         showToast("SHAKE!", "#f0a94e");
@@ -759,9 +983,9 @@ document.getElementById("btnPlayEndless").addEventListener("click", () => {
 document.getElementById("btnHowTo").addEventListener("click", () => { Sound.click(); showOverlay("overlay-howto"); });
 document.getElementById("btnSettingsFromTitle").addEventListener("click", () => { Sound.click(); showOverlay("overlay-settings"); });
 
-document.getElementById("weldBtn").addEventListener("click", () => { if (game.state === "playing") game.attemptWeld(); });
-document.getElementById("clearBtn").addEventListener("click", () => { if (game.state === "playing") { Sound.click(); game.clearBelt(); } });
-document.getElementById("magnetBtn").addEventListener("click", () => { if (game.state === "playing") game.useMagnet(); });
+document.getElementById("weldBtn").addEventListener("click", () => { if (game.state === "playing") { markInteraction(); game.attemptWeld(); } });
+document.getElementById("clearBtn").addEventListener("click", () => { if (game.state === "playing") { markInteraction(); Sound.click(); game.clearBelt(); } });
+document.getElementById("magnetBtn").addEventListener("click", () => { if (game.state === "playing") { markInteraction(); game.useMagnet(); } });
 
 document.getElementById("pauseBtn").addEventListener("click", () => {
   if (game.state !== "playing") return;
@@ -880,6 +1104,18 @@ function frame(now) {
   camera.lookAt(CAM_LOOKAT);
 
   feedConveyor.stripeTex.offset.y -= dt * 0.9;
+  updateDustField(dt);
+  updateWeldBursts(dt);
+
+  // Idle pile animation — a gentle rumble if the pile's gone untouched for
+  // a while, so it's never fully static even between plays.
+  if (game.state === "playing") {
+    const idleFor = now - lastInteractionAt;
+    if (idleFor > 12000 && now - lastIdleShakeAt > 6000) {
+      lastIdleShakeAt = now;
+      pileWorld.shakePile(0.22);
+    }
+  }
 
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
