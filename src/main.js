@@ -78,6 +78,20 @@ const ALL_WORDS = (function () {
   return s;
 })();
 
+// Rotating libraries of feedback text so a bad weld doesn't say the exact
+// same "NOT A WORD" every single time — picked at random per fail, never
+// twice in a row.
+const FAIL_MESSAGES = ["NOT A WORD", "NO SUCH SCRAP", "OOH, CLOSE", "NOT QUITE RIGHT", "MISFIRE", "SCRAP THAT ONE", "NICE TRY"];
+const TOO_SHORT_MESSAGES = ["TOO SHORT", "NEED MORE SCRAP", "KEEP BUILDING"];
+let lastFailMsg = "";
+function pickFailMessage(list) {
+  if (list.length === 1) return list[0];
+  let msg;
+  do { msg = list[Math.floor(Math.random() * list.length)]; } while (msg === lastFailMsg);
+  lastFailMsg = msg;
+  return msg;
+}
+
 const THEMES = [
   { name: "Tool Shed", lens: [3, 4, 5] },
   { name: "Scrapyard", lens: [4, 5, 6] },
@@ -135,8 +149,11 @@ function levelConfig(level, startDiff) {
   const L = Math.max(1, level + diffOffset);
   const theme = THEMES[(level - 1) % THEMES.length];
   const targetCount = clamp(2 + Math.floor(L / 3), 2, 7);
+  // Levels open at a strict 3-5 letter range and only widen/raise the floor
+  // gradually — minLen climbs slower than maxLen, so short words are always
+  // still in the mix even once the game is asking for longer ones too.
   const minLen = clamp(3 + Math.floor((L - 1) / 4), 3, 6);
-  const maxLen = clamp(minLen + 1 + Math.floor(L / 3), minLen + 1, 9);
+  const maxLen = clamp(5 + Math.floor((L - 1) / 3), 5, 9);
   const pileSize = clamp(10 + L * 2, 10, 32);
   const badWeldDamage = clamp(14 + Math.floor(L / 3) * 2, 14, 26);
   const timerSeconds = L >= 4 ? clamp(70 - L * 2, 30, 70) : null;
@@ -203,10 +220,14 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xc97a3f);
 scene.fog = new THREE.Fog(0xc97a3f, 9, 24);
 
-const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
-const CAM_BASE = new THREE.Vector3(0, 6.4, 6.9);
+const camera = new THREE.PerspectiveCamera(46, 1, 0.1, 100);
+// Pulled back and raised from the first pass — too close meant the target
+// chips (a DOM overlay near the top of the screen) covered too much of the
+// pile. Wider framing also gives the feed conveyor below room to read.
+const CAM_BASE = new THREE.Vector3(0, 8.6, 9.4);
+const CAM_LOOKAT = new THREE.Vector3(0, 0.6, 0);
 camera.position.copy(CAM_BASE);
-camera.lookAt(0, 1.0, 0);
+camera.lookAt(CAM_LOOKAT);
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 if ("outputColorSpace" in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -228,6 +249,51 @@ scene.add(fillLight);
 const pileWorld = new PileWorld(THREE, RAPIER, scene, {
   radius: 3.0, wallHeight: 2.3, colourblindSafe: SAVE.settings.colourblind
 });
+
+/* ---------------------------- Feed conveyor (decorative) -----------------
+   A tilted belt mounted on the rim, angled down into the pit, with a
+   scrolling hazard-stripe texture — sells the "junkyard feed" read the
+   pile alone doesn't give. Purely visual: new tiles still spawn via
+   pileWorld.spawnTile/randomDropPoint as before, timed to look like they're
+   dropping off the belt's low end. */
+function buildFeedConveyor() {
+  const stripeCanvas = document.createElement("canvas");
+  stripeCanvas.width = 64; stripeCanvas.height = 64;
+  const sctx = stripeCanvas.getContext("2d");
+  sctx.fillStyle = "#20180f"; sctx.fillRect(0, 0, 64, 64);
+  sctx.fillStyle = "#caa23a";
+  for (let i = -1; i < 5; i++) { sctx.save(); sctx.translate(i * 16, 0); sctx.rotate(Math.PI / 4); sctx.fillRect(-40, -40, 8, 160); sctx.restore(); }
+  const stripeTex = new THREE.CanvasTexture(stripeCanvas);
+  stripeTex.wrapS = THREE.RepeatWrapping; stripeTex.wrapT = THREE.RepeatWrapping;
+  stripeTex.repeat.set(3, 1);
+
+  const group = new THREE.Group();
+  const bedLen = 3.4, bedW = 1.05;
+  const bedGeo = new THREE.BoxGeometry(bedW, 0.16, bedLen);
+  const bedMat = new THREE.MeshStandardMaterial({ color: 0x33261a, roughness: 0.8, metalness: 0.3 });
+  const beltMat = new THREE.MeshStandardMaterial({ map: stripeTex, roughness: 0.9, metalness: 0.1 });
+  const bed = new THREE.Mesh(bedGeo, bedMat);
+  bed.castShadow = true; bed.receiveShadow = true;
+  group.add(bed);
+  const beltSurface = new THREE.Mesh(new THREE.BoxGeometry(bedW * 0.86, 0.02, bedLen * 0.94), beltMat);
+  beltSurface.position.y = 0.09;
+  group.add(beltSurface);
+
+  // simple support legs
+  const legMat = new THREE.MeshStandardMaterial({ color: 0x241a10, roughness: 0.85, metalness: 0.4 });
+  [[-bedW * 0.35, bedLen * 0.4], [bedW * 0.35, bedLen * 0.4]].forEach(([lx, lz]) => {
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.4, 8), legMat);
+    leg.position.set(lx, -0.7, lz);
+    group.add(leg);
+  });
+
+  group.position.set(-0.4, 3.1, -3.6);
+  group.rotation.x = -0.55; // tips down toward the pit
+  group.rotation.y = 0.12;
+  scene.add(group);
+  return { group, beltSurface, stripeTex };
+}
+const feedConveyor = buildFeedConveyor();
 
 function applyGraphicsQuality() {
   const q = SAVE.settings.quality || "auto";
@@ -281,8 +347,10 @@ function setHintVisual(entity, on) {
   const mats = Array.isArray(entity.mesh.material) ? entity.mesh.material : [entity.mesh.material];
   mats.forEach((m) => {
     if (!m.emissive) return;
-    m.emissive.setHex(on ? 0xf0a94e : 0x000000);
-    m.emissiveIntensity = on ? 0.45 : 0;
+    // Subtle — a faint warm glow, not a neon highlight. Dialled down from
+    // an earlier pass that ran far too bright against the dark metal.
+    m.emissive.setHex(on ? 0xb5651d : 0x000000);
+    m.emissiveIntensity = on ? 0.14 : 0;
   });
 }
 function retextureEntity(entity) {
@@ -413,7 +481,7 @@ Game.prototype.clearBelt = function () {
 };
 Game.prototype.attemptWeld = function () {
   const word = this.currentBeltWord();
-  if (word.length < 3) { this.weldFail("Too short"); return; }
+  if (word.length < 3) { this.weldFail(pickFailMessage(TOO_SHORT_MESSAGES)); return; }
   const targetMatch = this.targets.find((t) => !t.done && t.word === word);
   const isValid = ALL_WORDS.has(word);
   if (targetMatch) {
@@ -439,7 +507,7 @@ Game.prototype.attemptWeld = function () {
     updateHUD(this);
     this.applyHints();
   } else {
-    this.weldFail("NOT A WORD");
+    this.weldFail(pickFailMessage(FAIL_MESSAGES));
   }
 };
 Game.prototype.weldFail = function (msg) {
@@ -610,6 +678,49 @@ function floatCombo(text) {
   setTimeout(() => el.remove(), 900);
 }
 
+/* ---------------------------- Shake-to-shuffle ---------------------------
+   Jiggles the pile so buried letters get a chance to surface. Uses the
+   devicemotion API's acceleration delta as a crude shake detector — good
+   enough for a game-feel gesture, no permission needed on Android/desktop.
+   iOS 13+ requires an explicit user-gesture permission prompt, so that's
+   requested the first time the player taps a Play button (a genuine user
+   gesture) rather than at page load, where Safari would silently refuse it.
+--------------------------------------------------------------------------*/
+let shakeReady = false, lastShakeAt = 0, lastAccel = null;
+const SHAKE_COOLDOWN_MS = 1100;
+const SHAKE_THRESHOLD = 16; // m/s^2 of combined delta — tuned to ignore normal handling
+
+function onDeviceMotion(e) {
+  const a = e.accelerationIncludingGravity || e.acceleration;
+  if (!a || a.x == null) return;
+  if (lastAccel) {
+    const dx = a.x - lastAccel.x, dy = a.y - lastAccel.y, dz = a.z - lastAccel.z;
+    const delta = Math.abs(dx) + Math.abs(dy) + Math.abs(dz);
+    const now = performance.now();
+    if (delta > SHAKE_THRESHOLD && now - lastShakeAt > SHAKE_COOLDOWN_MS) {
+      lastShakeAt = now;
+      if (game.state === "playing") {
+        pileWorld.shakePile(1);
+        Sound.magnet();
+        showToast("SHAKE!", "#f0a94e");
+      }
+    }
+  }
+  lastAccel = a;
+}
+function enableShakeDetection() {
+  if (shakeReady || typeof DeviceMotionEvent === "undefined") return;
+  shakeReady = true;
+  const attach = () => window.addEventListener("devicemotion", onDeviceMotion);
+  // iOS 13+: DeviceMotionEvent.requestPermission must be called from a real
+  // user gesture (a click handler), which is exactly where this is invoked.
+  if (typeof DeviceMotionEvent.requestPermission === "function") {
+    DeviceMotionEvent.requestPermission().then((res) => { if (res === "granted") attach(); }).catch(() => { });
+  } else {
+    attach();
+  }
+}
+
 /* ---------------------------- Overlay management ------------------------ */
 const overlays = ["overlay-title", "overlay-howto", "overlay-settings", "overlay-pause", "overlay-levelcomplete", "overlay-gameover"];
 function showOverlay(id) {
@@ -638,11 +749,11 @@ function bumpDailyStreak() {
 }
 
 document.getElementById("btnPlayHaul").addEventListener("click", () => {
-  Sound.click(); bumpDailyStreak();
+  Sound.click(); bumpDailyStreak(); enableShakeDetection();
   game = new Game(); game.startHaul(1, "haul");
 });
 document.getElementById("btnPlayEndless").addEventListener("click", () => {
-  Sound.click();
+  Sound.click(); enableShakeDetection();
   game = new Game(); game.startHaul(1, "endless");
 });
 document.getElementById("btnHowTo").addEventListener("click", () => { Sound.click(); showOverlay("overlay-howto"); });
@@ -766,7 +877,9 @@ function frame(now) {
     ox = (Math.random() - 0.5) * s; oy = (Math.random() - 0.5) * s; oz = (Math.random() - 0.5) * s;
   }
   camera.position.set(CAM_BASE.x + ox, CAM_BASE.y + oy, CAM_BASE.z + oz);
-  camera.lookAt(0, 1.0, 0);
+  camera.lookAt(CAM_LOOKAT);
+
+  feedConveyor.stripeTex.offset.y -= dt * 0.9;
 
   renderer.render(scene, camera);
   requestAnimationFrame(frame);

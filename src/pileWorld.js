@@ -24,9 +24,11 @@
      scripted animation.
 */
 
-const WALL_SEGMENTS = 20;
+const WALL_SEGMENTS = 28; // more segments = tighter seams, less chance of a tile finding a gap
 const TILE_SIZE = 0.62; // half-extent * 2, in world units
 const TILE_HALF = TILE_SIZE / 2;
+const MAX_SPEED = 9; // world units/sec — hard cap so a kinematic drag shoving a tile can't fling it into orbit
+const LEASH_RADIUS_PAD = 1.1; // failsafe: if a tile ever gets past radius+this, it gets pulled back next step
 
 export class PileWorld {
   /**
@@ -83,7 +85,7 @@ export class PileWorld {
         RAPIER.RigidBodyDesc.fixed().setTranslation(x, wallHeight / 2, z).setRotation({ x: 0, y: qy, z: 0, w: qw })
       );
       world.createCollider(
-        RAPIER.ColliderDesc.cuboid(segLen / 2 + 0.02, wallHeight / 2, 0.15)
+        RAPIER.ColliderDesc.cuboid(segLen / 2 + 0.04, wallHeight / 2, 0.24)
           .setFriction(0.7)
           .setRestitution(0.15),
         wallBody
@@ -146,6 +148,7 @@ export class PileWorld {
         .setTranslation(pos.x, pos.y, pos.z)
         .setLinearDamping(0.15)
         .setAngularDamping(0.35)
+        .setCcdEnabled(true) // continuous collision detection — stops a fast tile tunnelling through a wall segment in one step
     );
     const collider = world.createCollider(
       RAPIER.ColliderDesc.cuboid(TILE_HALF, TILE_HALF, TILE_HALF).setFriction(0.6).setRestitution(0.25).setDensity(1.4),
@@ -206,13 +209,55 @@ export class PileWorld {
       this._accumulator -= this._fixedDt;
       steps++;
     }
-    // sync every live mesh to its physics body
+    // Failsafe containment: a kinematic drag shoving a stack of dynamic
+    // tiles out of the way can hand one of them a huge one-frame velocity
+    // ("flung into hyperspace") — clamp speed every step, and if a tile
+    // ever ends up outside the drum anyway (a seam gap, an edge case),
+    // pull it back in rather than let it sail off into the void.
+    const leashR = this.radius + LEASH_RADIUS_PAD;
     for (const e of this.entities) {
       if (!e.body || !e.mesh) continue;
+      if (!e.held) {
+        const v = e.body.linvel();
+        const speed = Math.hypot(v.x, v.y, v.z);
+        if (speed > MAX_SPEED) {
+          const s = MAX_SPEED / speed;
+          e.body.setLinvel({ x: v.x * s, y: v.y * s, z: v.z * s }, true);
+        }
+        const t = e.body.translation();
+        const distXZ = Math.hypot(t.x, t.z);
+        if (distXZ > leashR || t.y < -3 || t.y > this.wallHeight + 6) {
+          const drop = this.randomDropPoint(Math.random);
+          e.body.setTranslation({ x: drop.x, y: Math.max(drop.y, this.wallHeight * 0.5), z: drop.z }, true);
+          e.body.setLinvel({ x: 0, y: -1, z: 0 }, true);
+          e.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+        }
+      }
       const t = e.body.translation();
       const r = e.body.rotation();
       e.mesh.position.set(t.x, t.y, t.z);
       e.mesh.quaternion.set(r.x, r.y, r.z, r.w);
+    }
+  }
+
+  /**
+   * Jiggles the whole pile — a light random upward+outward impulse on every
+   * free (not held, not on the belt) tile, so a stagnant lower layer gets a
+   * chance to surface. Driven by a phone shake gesture in the UI layer.
+   */
+  shakePile(strength) {
+    const s = strength || 1;
+    for (const e of this.entities) {
+      if (!e.body || e.held) continue;
+      const v = e.body.linvel();
+      e.body.setLinvel({
+        x: v.x + (Math.random() - 0.5) * 3.5 * s,
+        y: Math.max(v.y, 0) + (2.2 + Math.random() * 2.2) * s,
+        z: v.z + (Math.random() - 0.5) * 3.5 * s
+      }, true);
+      e.body.setAngvel({
+        x: (Math.random() - 0.5) * 6, y: (Math.random() - 0.5) * 6, z: (Math.random() - 0.5) * 6
+      }, true);
     }
   }
 
