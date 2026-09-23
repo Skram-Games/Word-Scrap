@@ -1,0 +1,397 @@
+  :root{
+    --rust-900:#2a1810;
+    --rust-800:#3d2415;
+    --rust-700:#54301a;
+    --rust-600:#7a4420;
+    --copper-500:#b5651d;
+    --copper-400:#d4832f;
+    --amber-300:#f0a94e;
+    --amber-200:#f7c877;
+    --steel-600:#5a6268;
+    --steel-500:#7c8790;
+    --steel-300:#c5ccd1;
+    --paper-100:#f4ead9;
+    --ok-500:#5fb35f;
+    --ok-glow:#9dffb0;
+    --bad-500:#c0453b;
+    --sky-top:#e8ad63;
+    --sky-bot:#c97a3f;
+    --shadow-deep: rgba(20,10,5,0.6);
+    --focus: #ffd479;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color: transparent; user-select:none;}
+  html,body{
+    margin:0; padding:0; width:100%; height:100%; overflow:hidden;
+    background:var(--rust-900);
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    color:var(--paper-100);
+    touch-action:none;
+  }
+  #app{
+    position:fixed; inset:0;
+    display:flex; align-items:center; justify-content:center;
+    background: radial-gradient(ellipse at 50% -10%, #4a2c18 0%, var(--rust-900) 70%);
+  }
+  #gameRoot{
+    position:relative;
+    width:100%; height:100%;
+    max-width:520px;
+    background:linear-gradient(180deg, var(--sky-top) 0%, var(--sky-bot) 38%, var(--rust-800) 39%, var(--rust-900) 100%);
+    overflow:hidden;
+    box-shadow: 0 0 60px var(--shadow-deep);
+  }
+  canvas{ position:absolute; inset:0; width:100%; height:100%; display:block; touch-action:none; }
+
+  /* ---------- Top HUD ---------- */
+  #hud{
+    position:absolute; top:0; left:0; right:0;
+    display:flex; align-items:center; justify-content:space-between;
+    padding: max(10px, env(safe-area-inset-top)) 12px 8px 12px;
+    z-index:20; pointer-events:none;
+  }
+  #hud > *{ pointer-events:auto; }
+  .hud-cluster{ display:flex; align-items:center; gap:8px; }
+  .pill{
+    display:flex; align-items:center; gap:6px;
+    background:rgba(30,16,8,0.55);
+    border:1px solid rgba(240,169,78,0.35);
+    border-radius:20px; padding:6px 12px;
+    font-weight:700; font-size:14px; letter-spacing:0.3px;
+    backdrop-filter: blur(2px);
+  }
+  .pill svg{ width:16px; height:16px; flex:none; }
+  #integrityWrap{ display:flex; flex-direction:column; gap:3px; min-width:110px; }
+  #integrityLabel{ font-size:10px; text-transform:uppercase; letter-spacing:1px; opacity:0.85; display:flex; justify-content:space-between; }
+  #integrityBar{
+    height:8px; border-radius:5px; overflow:hidden;
+    background:rgba(0,0,0,0.35); border:1px solid rgba(0,0,0,0.4);
+  }
+  #integrityFill{
+    height:100%; width:100%;
+    background:linear-gradient(90deg, var(--ok-500), var(--ok-glow));
+    transition:width 0.35s ease, background 0.35s ease;
+  }
+  .iconBtn{
+    width:38px; height:38px; border-radius:50%;
+    background:rgba(30,16,8,0.55);
+    border:1px solid rgba(240,169,78,0.35);
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer;
+  }
+  .iconBtn svg{ width:19px; height:19px; }
+  .iconBtn:active{ transform:scale(0.92); }
+
+  /* ---------- Level / target strip — styled as gauge patches on a
+     control panel rather than floating chips, per feedback that the old
+     chips just hovered over (and hid) the pile ---------- */
+  #targetStrip{
+    position:absolute; top:60px; left:8px; right:8px;
+    display:flex; align-items:stretch; justify-content:center; gap:6px;
+    z-index:15; flex-wrap:wrap; padding:8px 10px 10px;
+    pointer-events:none;
+    background:
+      repeating-linear-gradient(90deg, rgba(0,0,0,0.12) 0 2px, transparent 2px 22px),
+      linear-gradient(180deg, #4a3a28, #382b1c);
+    border:2px solid #1c140c;
+    border-radius:12px;
+    box-shadow: inset 0 2px 4px rgba(255,255,255,0.06), inset 0 -3px 6px rgba(0,0,0,0.45), 0 5px 12px rgba(0,0,0,0.4);
+  }
+  .targetChip{
+    background:linear-gradient(180deg, #241a10, #17110a);
+    border:1px solid #0d0904;
+    border-radius:6px; padding:5px 9px 6px;
+    font-size:12px; font-weight:700; letter-spacing:1px;
+    text-transform:uppercase;
+    display:flex; align-items:center; gap:6px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -2px 3px rgba(0,0,0,0.6), 0 1px 0 rgba(255,255,255,0.04);
+    position:relative;
+  }
+  .targetChip::before{
+    /* a small unlit LED indicator, like a panel gauge waiting to trip */
+    content:""; width:6px; height:6px; border-radius:50%;
+    background:#5a3f22; box-shadow:0 0 3px rgba(240,169,78,0.15);
+    flex:none;
+  }
+  .targetChip.done{
+    background:linear-gradient(180deg, #1e3320, #142418);
+    border-color:#0a1a0c; text-decoration:line-through; opacity:0.8;
+  }
+  .targetChip.done::before{ background:var(--ok-glow); box-shadow:0 0 6px var(--ok-glow); }
+  .targetChip .len{ opacity:0.6; font-weight:400; color:var(--steel-300); }
+
+  /* ---------- Conveyor / belt ---------- */
+  #beltWrap{
+    position:absolute; left:0; right:0; bottom:132px;
+    display:flex; justify-content:center; z-index:15;
+  }
+  #belt{
+    display:flex; gap:6px; padding:10px 12px;
+    background:
+      repeating-linear-gradient(90deg, rgba(0,0,0,0.18) 0 3px, transparent 3px 26px),
+      linear-gradient(180deg, var(--steel-500), var(--steel-600));
+    border:3px solid #3a3f43;
+    border-radius:12px;
+    box-shadow: inset 0 3px 8px rgba(0,0,0,0.4), 0 6px 14px rgba(0,0,0,0.35);
+    min-height:58px;
+    max-width:94%;
+  }
+  .beltSlot{
+    width:44px; height:44px; border-radius:8px;
+    border:2px dashed rgba(255,255,255,0.25);
+    display:flex; align-items:center; justify-content:center;
+    flex:none;
+  }
+  .beltSlot.filled{ border-style:solid; border-color:transparent; }
+
+  /* ---------- Action row: "machine control panel" ----------
+     Redesigned from a bare row of floating buttons into a riveted metal
+     console the player reads as standing in front of, with the Weld
+     button as its big industrial trigger. */
+  #actionRow{
+    position:absolute; left:0; right:0; bottom:26px;
+    display:flex; align-items:center; justify-content:center; gap:16px;
+    z-index:15;
+    padding:14px 22px 12px;
+    background:
+      radial-gradient(circle at 8px 8px, rgba(0,0,0,0.5) 1.5px, transparent 2px) 0 0/16px 16px,
+      linear-gradient(180deg, #3a3229, #221c16 55%, #171310);
+    border:2px solid #0c0906;
+    border-top:3px solid #4a4038;
+    border-radius:18px 18px 10px 10px;
+    box-shadow: inset 0 2px 0 rgba(255,255,255,0.06), inset 0 -6px 12px rgba(0,0,0,0.55), 0 8px 20px rgba(0,0,0,0.5);
+    max-width:94%;
+  }
+  .bigBtn{
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:2px;
+    border:none; cursor:pointer; font-weight:800; letter-spacing:0.5px;
+    color:var(--paper-100);
+    text-transform:uppercase;
+  }
+  #weldBtn{
+    width:88px; height:88px; border-radius:50%;
+    background:radial-gradient(circle at 35% 28%, #ff6a3d, #c2371c 58%, #6b1808 100%);
+    border:5px solid #2a0f06;
+    outline:3px solid #5a3a1c;
+    outline-offset:2px;
+    box-shadow: 0 7px 0 #3a1206, 0 12px 22px rgba(0,0,0,0.55), inset 0 2px 4px rgba(255,255,255,0.25);
+    font-size:12px;
+    position:relative;
+  }
+  /* hazard-stripe ring around the trigger, like a real industrial e-stop */
+  #weldBtn::after{
+    content:""; position:absolute; inset:-9px; border-radius:50%;
+    background: repeating-conic-gradient(#f0a94e 0deg 12deg, #201812 12deg 24deg);
+    z-index:-1; opacity:0.85;
+  }
+  #weldBtn:active{ transform:translateY(5px); box-shadow: 0 2px 0 #3a1206, 0 4px 10px rgba(0,0,0,0.5), inset 0 2px 4px rgba(255,255,255,0.25); }
+  #weldBtn svg{ width:28px; height:28px; }
+  .sideBtn{
+    width:56px; height:56px; border-radius:10px;
+    background:linear-gradient(180deg, #2c241c, #161109);
+    border:2px solid #0c0906;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), inset 0 -3px 6px rgba(0,0,0,0.5), 0 3px 0 #0c0906;
+    font-size:9px;
+  }
+  .sideBtn:active:not(:disabled){ transform:translateY(2px); box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), inset 0 -3px 6px rgba(0,0,0,0.5), 0 1px 0 #0c0906; }
+  .sideBtn svg{ width:22px; height:22px; }
+  .sideBtn .count{
+    position:absolute; margin-top:-30px; margin-left:26px;
+    background:var(--copper-500); border-radius:8px; font-size:10px;
+    padding:1px 5px; border:1px solid var(--rust-900);
+  }
+  .sideBtn:disabled{ opacity:0.35; }
+  .bigBtn:active:not(:disabled){ filter:brightness(1.15); }
+
+  /* ---------- Toast / feedback text ---------- */
+  #toast{
+    position:absolute; left:50%; top:38%; transform:translate(-50%,-50%) scale(0.8);
+    font-size:28px; font-weight:900; letter-spacing:1px;
+    text-shadow: 0 3px 0 rgba(0,0,0,0.4);
+    opacity:0; pointer-events:none; z-index:30;
+    transition:none;
+  }
+  #toast.show{ animation: toastPop 0.9s ease forwards; }
+  @keyframes toastPop{
+    0%{ opacity:0; transform:translate(-50%,-40%) scale(0.6); }
+    18%{ opacity:1; transform:translate(-50%,-50%) scale(1.08); }
+    30%{ transform:translate(-50%,-50%) scale(1); }
+    75%{ opacity:1; }
+    100%{ opacity:0; transform:translate(-50%,-65%) scale(1); }
+  }
+
+  /* ---------- Overlays (menus) ---------- */
+  .overlay{
+    position:absolute; inset:0; z-index:50;
+    display:flex; align-items:center; justify-content:center;
+    background: radial-gradient(ellipse at 50% 20%, rgba(84,48,26,0.96), rgba(30,16,8,0.98));
+    backdrop-filter: blur(3px);
+  }
+  .overlay.hidden{ display:none; }
+  .panel{
+    width:88%; max-width:400px; max-height:86vh; overflow-y:auto;
+    background:linear-gradient(180deg, var(--rust-700), var(--rust-800));
+    border:3px solid var(--copper-500);
+    border-radius:20px;
+    padding:22px 20px 26px;
+    box-shadow: 0 14px 30px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255,255,255,0.05);
+    text-align:center;
+  }
+  .logo{
+    font-size:38px; font-weight:900; letter-spacing:1px; line-height:1.05;
+    text-transform:uppercase;
+    background:linear-gradient(180deg, var(--amber-200), var(--copper-500));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    text-shadow:0 2px 0 rgba(0,0,0,0.001);
+    filter: drop-shadow(0 3px 0 rgba(30,16,8,0.8));
+    margin-bottom:2px;
+  }
+  .logo small{ display:block; font-size:13px; letter-spacing:4px; color:var(--steel-300); -webkit-text-fill-color: var(--steel-300); background:none; margin-top:4px;}
+  .tagline{ font-size:12.5px; color:var(--steel-300); margin:6px 0 20px; letter-spacing:0.3px;}
+  .menuBtn{
+    display:flex; align-items:center; justify-content:center; gap:10px;
+    width:100%; padding:14px 16px; margin-bottom:10px;
+    border-radius:14px; border:none; cursor:pointer;
+    font-size:15px; font-weight:800; letter-spacing:0.6px; text-transform:uppercase;
+    background:linear-gradient(180deg, var(--copper-400), var(--copper-500));
+    color:#2a1810;
+    box-shadow: 0 4px 0 #7a4a17, 0 8px 14px rgba(0,0,0,0.35);
+  }
+  .menuBtn:active{ transform:translateY(3px); box-shadow: 0 1px 0 #7a4a17, 0 3px 8px rgba(0,0,0,0.35); }
+  .menuBtn.ghost{
+    background:rgba(0,0,0,0.2); color:var(--paper-100);
+    box-shadow: 0 3px 0 rgba(0,0,0,0.35);
+    border:1px solid rgba(240,169,78,0.3);
+  }
+  .menuBtn svg{ width:18px; height:18px; flex:none; }
+  .statsRow{ display:flex; justify-content:space-around; margin:14px 0 18px; gap:8px; flex-wrap:wrap; }
+  .statBox{
+    background:rgba(0,0,0,0.25); border-radius:12px; padding:10px 14px; min-width:74px;
+    border:1px solid rgba(255,255,255,0.08);
+  }
+  .statBox .num{ font-size:20px; font-weight:900; color:var(--amber-200); }
+  .statBox .lbl{ font-size:9px; text-transform:uppercase; letter-spacing:1px; color:var(--steel-300); margin-top:2px;}
+
+  .panelTitle{ font-size:20px; font-weight:900; text-transform:uppercase; letter-spacing:1px; margin-bottom:16px; color:var(--amber-200); }
+  .settingRow{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:12px 4px; border-bottom:1px solid rgba(255,255,255,0.08);
+    text-align:left; font-size:14px; font-weight:600;
+  }
+  .settingRow:last-of-type{ border-bottom:none; }
+  .switch{
+    width:46px; height:26px; border-radius:14px; background:rgba(0,0,0,0.35);
+    border:1px solid rgba(255,255,255,0.15); position:relative; cursor:pointer; flex:none;
+  }
+  .switch .knob{
+    position:absolute; top:2px; left:2px; width:20px; height:20px; border-radius:50%;
+    background:var(--steel-300); transition:left 0.18s ease, background 0.18s ease;
+  }
+  .switch.on{ background: rgba(95,179,95,0.4); border-color:var(--ok-glow); }
+  .switch.on .knob{ left:22px; background:var(--ok-glow); }
+  .slider{
+    -webkit-appearance:none; width:120px; height:6px; border-radius:4px;
+    background:rgba(0,0,0,0.35); outline:none;
+  }
+  .slider::-webkit-slider-thumb{
+    -webkit-appearance:none; width:18px; height:18px; border-radius:50%;
+    background:var(--amber-200); cursor:pointer; border:2px solid var(--rust-900);
+  }
+  .howtoStep{ display:flex; gap:12px; text-align:left; margin-bottom:14px; align-items:flex-start; }
+  .howtoStep .num{
+    flex:none; width:26px; height:26px; border-radius:50%; background:var(--copper-500);
+    display:flex; align-items:center; justify-content:center; font-weight:900; font-size:13px;
+  }
+  .howtoStep p{ margin:0; font-size:13.5px; line-height:1.4; color:var(--paper-100); }
+  .howtoStep b{ color:var(--amber-200); }
+  .closeX{
+    position:absolute; top:14px; right:14px; width:32px; height:32px; border-radius:50%;
+    background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.15);
+    display:flex; align-items:center; justify-content:center; cursor:pointer;
+  }
+  .themeBadge{
+    display:inline-block; background:rgba(0,0,0,0.3); border:1px solid rgba(240,169,78,0.3);
+    border-radius:10px; padding:3px 10px; font-size:11px; letter-spacing:1px; text-transform:uppercase;
+    margin-bottom:14px; color:var(--amber-200);
+  }
+  .difficultyRow{ display:flex; gap:8px; margin:10px 0 4px; }
+  .diffBtn{
+    flex:1; padding:10px 4px; border-radius:10px; border:2px solid rgba(255,255,255,0.12);
+    background:rgba(0,0,0,0.25); color:var(--paper-100); font-weight:800; font-size:12px;
+    text-transform:uppercase; cursor:pointer; letter-spacing:0.5px;
+  }
+  .diffBtn.active{ border-color:var(--amber-200); background:rgba(240,169,78,0.22); color:var(--amber-200); }
+
+  .streakRust{ filter: grayscale(0.6) brightness(0.7); }
+
+  #pauseBtn{ position:relative; }
+  .comboFloat{
+    position:absolute; font-weight:900; font-size:15px; color:var(--amber-200);
+    text-shadow:0 2px 0 rgba(0,0,0,0.5); pointer-events:none; z-index:25;
+    animation: floatUp 0.85s ease forwards;
+  }
+  @keyframes floatUp{
+    0%{ opacity:0; transform:translateY(0) scale(0.7); }
+    15%{ opacity:1; transform:translateY(-6px) scale(1); }
+    100%{ opacity:0; transform:translateY(-46px) scale(1); }
+  }
+
+  #levelUpBanner{
+    position:absolute; left:0; right:0; top:42%; text-align:center; z-index:40;
+    pointer-events:none; opacity:0;
+  }
+  #levelUpBanner.show{ animation: levelBanner 1.6s ease forwards; }
+  @keyframes levelBanner{
+    0%{ opacity:0; transform:scale(0.7); }
+    20%{ opacity:1; transform:scale(1.05); }
+    30%{ transform:scale(1); }
+    80%{ opacity:1; }
+    100%{ opacity:0; transform:scale(1); }
+  }
+  #levelUpBanner .big{
+    font-size:34px; font-weight:900; text-transform:uppercase; letter-spacing:2px;
+    color:var(--amber-200); text-shadow:0 4px 0 rgba(0,0,0,0.5);
+  }
+  #levelUpBanner .small{ font-size:13px; color:var(--paper-100); letter-spacing:1px; margin-top:4px;}
+
+  ::-webkit-scrollbar{ width:8px; }
+  ::-webkit-scrollbar-thumb{ background:var(--copper-500); border-radius:6px; }
+
+  @media (max-height: 640px){
+    #beltWrap{ bottom:112px; }
+    #actionRow{ bottom:26px; }
+    .bigBtn#weldBtn{ width:72px; height:72px; }
+  }
+
+  /* ---------- 3D canvas + engine boot states ---------- */
+  #glCanvas{ position:absolute; inset:0; width:100%; height:100%; display:block; touch-action:none; outline:none; }
+  /* Vignette — pulls the eye toward the pile instead of the whole scene
+     reading as one flat orange field. Sits above the canvas, below the
+     HUD/menus, and never intercepts input. */
+  #vignette{
+    position:absolute; inset:0; z-index:8; pointer-events:none;
+    background: radial-gradient(ellipse at 50% 42%, rgba(0,0,0,0) 40%, rgba(15,8,4,0.55) 100%);
+  }
+  #bootOverlay{
+    position:absolute; inset:0; z-index:60;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px;
+    background:radial-gradient(ellipse at 50% 20%, rgba(84,48,26,0.98), rgba(30,16,8,1));
+  }
+  #bootOverlay.hidden{ display:none; }
+  .bootSpinner{
+    width:52px; height:52px; border-radius:50%;
+    border:4px solid rgba(240,169,78,0.25); border-top-color:var(--amber-200);
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+  #bootLabel{ font-size:13px; letter-spacing:1px; text-transform:uppercase; color:var(--steel-300); }
+  #bootError{
+    display:none; max-width:320px; text-align:center; padding:0 20px;
+    font-size:13px; line-height:1.5; color:var(--paper-100);
+  }
+  #bootError.show{ display:block; }
+  #bootError b{ color:var(--amber-200); }
+  #bootError code{
+    display:block; margin-top:10px; padding:8px 10px; border-radius:8px;
+    background:rgba(0,0,0,0.35); font-size:11px; color:var(--steel-300); word-break:break-all;
+  }

@@ -147,41 +147,34 @@ function persist() {
 }
 
 /* ---------------------------- Difficulty curve -------------------------- */
+// Redesigned so each level asks for exactly ONE target word, sized to
+// wordLen — the belt is built with exactly that many slots, so there's
+// never ambiguity about "maybe a 4 or maybe 5 letter word". Pile size now
+// grows much more steeply than the word length: early levels are a small,
+// quick sieve; later levels bury the target letters in a much bigger pile.
 function levelConfig(level, startDiff) {
   const diffOffset = startDiff === "relaxed" ? -1 : startDiff === "scrapper" ? 1 : 0;
   const L = Math.max(1, level + diffOffset);
   const theme = THEMES[(level - 1) % THEMES.length];
-  const targetCount = clamp(2 + Math.floor(L / 3), 2, 7);
-  // Levels open at a strict 3-5 letter range and only widen/raise the floor
-  // gradually — minLen climbs slower than maxLen, so short words are always
-  // still in the mix even once the game is asking for longer ones too.
-  const minLen = clamp(3 + Math.floor((L - 1) / 4), 3, 6);
-  const maxLen = clamp(5 + Math.floor((L - 1) / 3), 5, 9);
-  // Higher baseline than the 2D version's — the 3D pit reads as empty at
-  // low tile counts in a way a flat 2D pile didn't. This is the STARTING
-  // count; spawnDripTile() keeps topping it up during play too.
-  const pileSize = clamp(18 + L * 2, 18, 34);
+  // One word per level. Starts at 3 letters, climbs roughly one letter
+  // every 2 levels, capped at 9.
+  const wordLen = clamp(3 + Math.floor((L - 1) / 2), 3, 9);
+  // Early levels: a small, almost-bare pile (mostly just the target's own
+  // letters) so a new player can find them at a glance. Later levels bury
+  // the word in a much bigger, noisier pile — a real sieve.
+  const pileSize = clamp(wordLen + 4 + L * 3, wordLen + 4, 60);
   const badWeldDamage = clamp(14 + Math.floor(L / 3) * 2, 14, 26);
   const timerSeconds = L >= 4 ? clamp(70 - L * 2, 30, 70) : null;
   const magnetsAwarded = level === 1 ? 3 : (level % 3 === 0 ? 1 : 0);
-  return { level, theme, targetCount, minLen, maxLen, pileSize, badWeldDamage, timerSeconds, magnetsAwarded };
+  return { level, theme, wordLen, pileSize, badWeldDamage, timerSeconds, magnetsAwarded };
 }
-function chooseTargetWords(rng, cfg) {
-  const candidates = [];
-  for (let len = cfg.minLen; len <= cfg.maxLen; len++) if (WORD_BANK[len]) candidates.push(...WORD_BANK[len]);
-  const pool = shuffle(rng, candidates);
-  const targets = []; const seen = new Set();
-  for (const w of pool) {
-    if (targets.length >= cfg.targetCount) break;
-    if (seen.has(w)) continue;
-    seen.add(w); targets.push(w);
-  }
-  while (targets.length < cfg.targetCount) {
-    const len = cfg.minLen + (targets.length % (cfg.maxLen - cfg.minLen + 1));
-    const w = pick(rng, WORD_BANK[len] || WORD_BANK[4]);
-    if (!seen.has(w)) { seen.add(w); targets.push(w); }
-  }
-  return targets;
+function chooseTargetWord(rng, cfg) {
+  const bank = WORD_BANK[cfg.wordLen];
+  if (bank && bank.length) return pick(rng, bank);
+  // Fallback: the validity-only dictionary keyed by length the same way.
+  const wide = FULL_DICT[cfg.wordLen];
+  if (wide && wide.length) return pick(rng, wide);
+  return pick(rng, WORD_BANK[4] || WORD_BANK[3]);
 }
 const LETTER_FREQ = "EEEEEEEEEAAAAAAAARRRRRRRIIIIIIIOOOOOOOTTTTTTTNNNNNNSSSSSSLLLLLCCCCUUUUDDDDPPPMMMHHHGGBBFFYYWWKVXZJQ";
 function buildPileLetters(rng, cfg, targetWords) {
@@ -306,12 +299,58 @@ function buildSkylineBackdrop() {
   for (let x = -20; x < w + 40; x += 26) { bctx.beginPath(); bctx.moveTo(x, h * 0.6); bctx.lineTo(x + 40, h * 0.72); bctx.stroke(); }
 
   const tex = new THREE.CanvasTexture(c);
-  const mat = new THREE.MeshBasicMaterial({ map: tex, fog: true });
+  // fog:false — the plane's own painted gradient already fades to the same
+  // hue at its base, and the scene fog is the SAME colour as scene.background,
+  // so with fog on this plane was blending into total invisibility at its
+  // distance. Unlit + fog-exempt keeps the silhouette readable at all times.
+  const mat = new THREE.MeshBasicMaterial({ map: tex, fog: false });
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(30, 12.3), mat);
-  mesh.position.set(0, 4.6, -12.5);
+  mesh.position.set(0, 4.6, -10.5);
   scene.add(mesh);
 }
 buildSkylineBackdrop();
+
+/* ---------------------------- Scrapyard ground extension ------------------
+   The pit drum used to sit alone in a flat colour field, reading as "a bowl"
+   with nothing around it. A wide ground disc plus a scatter of low junk
+   silhouettes (crushed panels, tyres, a drum) around the rim sells "a corner
+   of a scrapyard" instead of "an object floating in space". */
+function buildYardGround() {
+  const groundMat = new THREE.MeshStandardMaterial({ color: 0x4a3524, roughness: 0.95, metalness: 0.05 });
+  const ground = new THREE.Mesh(new THREE.CircleGeometry(16, 40), groundMat);
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = -0.05;
+  ground.receiveShadow = true;
+  scene.add(ground);
+
+  const junkMat = new THREE.MeshStandardMaterial({ color: 0x2c2016, roughness: 0.9, metalness: 0.25 });
+  const junkMat2 = new THREE.MeshStandardMaterial({ color: 0x5a3a20, roughness: 0.85, metalness: 0.15 });
+  const ringR = 5.6;
+  for (let i = 0; i < 10; i++) {
+    const ang = (i / 10) * Math.PI * 2 + 0.3;
+    const dist = ringR + Math.random() * 3.2;
+    const x = Math.cos(ang) * dist, z = Math.sin(ang) * dist;
+    if (z > -1) continue; // keep the camera-facing arc clear
+    const kind = Math.random();
+    let mesh;
+    if (kind < 0.4) {
+      mesh = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.11, 8, 14), junkMat);
+      mesh.rotation.x = Math.PI / 2;
+      mesh.position.y = 0.11;
+    } else if (kind < 0.75) {
+      mesh = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.5 + Math.random() * 0.5, 0.55), Math.random() < 0.5 ? junkMat : junkMat2);
+      mesh.rotation.y = Math.random() * Math.PI;
+      mesh.position.y = mesh.geometry.parameters.height / 2;
+    } else {
+      mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.4, 0.9, 10), junkMat2);
+      mesh.position.y = 0.45;
+    }
+    mesh.position.x = x; mesh.position.z = z;
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    scene.add(mesh);
+  }
+}
+buildYardGround();
 
 /* ---------------------------- Ambient dust motes ---------------------------
    A light drifting particle field for atmosphere — no interaction, just
@@ -402,61 +441,81 @@ const pileWorld = new PileWorld(THREE, RAPIER, scene, {
   radius: 3.0, wallHeight: 2.3, colourblindSafe: SAVE.settings.colourblind
 });
 
-/* ---------------------------- Feed conveyor (decorative) -----------------
-   A tilted belt mounted on the rim, angled down into the pit, with a
-   scrolling hazard-stripe texture — sells the "junkyard feed" read the
-   pile alone doesn't give. Purely visual: new tiles still spawn via
-   pileWorld.spawnTile/randomDropPoint as before, timed to look like they're
-   dropping off the belt's low end. */
+/* ---------------------------- Feed conveyor (now load-bearing) ------------
+   Rebuilt from scratch: instead of a thin decorative box that didn't read
+   as a belt from the play camera, this is a real ramp between two explicit
+   world-space points — RAMP_TOP (origin, back near the skyline) and
+   RAMP_BOTTOM (over the pit rim) — oriented along that exact segment, with
+   a wide unlit hazard-stripe surface (MeshBasicMaterial so it's always
+   bright regardless of scene lighting/fog) and a scrolling texture to sell
+   motion. Drip-feed tiles now actually RIDE this path (see ridingDrips /
+   Game.prototype.spawnDripTile) instead of just appearing at its foot, so
+   the visible belt and the gameplay feed are the same object. */
+const RAMP_TOP = new THREE.Vector3(-1.1, 4.35, -8.4);
+const RAMP_BOTTOM = new THREE.Vector3(0.15, 1.55, -0.35);
+
 function buildFeedConveyor() {
   const stripeCanvas = document.createElement("canvas");
   stripeCanvas.width = 64; stripeCanvas.height = 64;
   const sctx = stripeCanvas.getContext("2d");
-  sctx.fillStyle = "#20180f"; sctx.fillRect(0, 0, 64, 64);
-  sctx.fillStyle = "#caa23a";
+  sctx.fillStyle = "#161008"; sctx.fillRect(0, 0, 64, 64);
+  sctx.fillStyle = "#f0b429";
   for (let i = -1; i < 5; i++) { sctx.save(); sctx.translate(i * 16, 0); sctx.rotate(Math.PI / 4); sctx.fillRect(-40, -40, 8, 160); sctx.restore(); }
   const stripeTex = new THREE.CanvasTexture(stripeCanvas);
   stripeTex.wrapS = THREE.RepeatWrapping; stripeTex.wrapT = THREE.RepeatWrapping;
-  stripeTex.repeat.set(3, 1);
+
+  const path = new THREE.Vector3().subVectors(RAMP_BOTTOM, RAMP_TOP);
+  const bedLen = path.length();
+  const bedW = 1.35;
+  const dir = path.clone().normalize();
+  const mid = new THREE.Vector3().addVectors(RAMP_TOP, RAMP_BOTTOM).multiplyScalar(0.5);
+  const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
 
   const group = new THREE.Group();
-  const bedLen = 3.4, bedW = 1.05;
-  const bedGeo = new THREE.BoxGeometry(bedW, 0.16, bedLen);
-  const bedMat = new THREE.MeshStandardMaterial({ color: 0x33261a, roughness: 0.8, metalness: 0.3 });
-  const beltMat = new THREE.MeshStandardMaterial({ map: stripeTex, roughness: 0.9, metalness: 0.1 });
-  const bed = new THREE.Mesh(bedGeo, bedMat);
+  group.position.copy(mid);
+  group.quaternion.copy(quat);
+  scene.add(group);
+
+  stripeTex.repeat.set(2, bedLen * 1.6);
+  const bedMat = new THREE.MeshStandardMaterial({ color: 0x2a2015, roughness: 0.85, metalness: 0.35 });
+  const bed = new THREE.Mesh(new THREE.BoxGeometry(bedW, bedLen, 0.22), bedMat);
+  bed.rotation.x = Math.PI / 2;
   bed.castShadow = true; bed.receiveShadow = true;
   group.add(bed);
-  const beltSurface = new THREE.Mesh(new THREE.BoxGeometry(bedW * 0.86, 0.02, bedLen * 0.94), beltMat);
-  beltSurface.position.y = 0.09;
+
+  // Unlit stripe surface — guaranteed bright/visible however the scene is lit.
+  const beltMat = new THREE.MeshBasicMaterial({ map: stripeTex, fog: false });
+  const beltSurface = new THREE.Mesh(new THREE.BoxGeometry(bedW * 0.82, bedLen * 0.97, 0.02), beltMat);
+  beltSurface.rotation.x = Math.PI / 2;
+  beltSurface.position.y = 0.12;
   group.add(beltSurface);
 
-  // simple support legs
+  // Guardrails down both edges — reads as a belt silhouette even at a glance.
+  const railMat = new THREE.MeshStandardMaterial({ color: 0x6b4423, roughness: 0.7, metalness: 0.5 });
+  [-1, 1].forEach((side) => {
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.06, bedLen, 0.16), railMat);
+    rail.rotation.x = Math.PI / 2;
+    rail.position.set(side * bedW * 0.44, 0.16, 0);
+    group.add(rail);
+  });
+
+  // Support legs down to the ground under the belt's midpoint.
   const legMat = new THREE.MeshStandardMaterial({ color: 0x241a10, roughness: 0.85, metalness: 0.4 });
-  [[-bedW * 0.35, bedLen * 0.4], [bedW * 0.35, bedLen * 0.4]].forEach(([lx, lz]) => {
-    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.4, 8), legMat);
-    leg.position.set(lx, -0.7, lz);
+  [-1, 1].forEach((side) => {
+    const legLen = Math.max(0.4, mid.y - 0.1);
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, legLen, 8), legMat);
+    leg.position.set(side * bedW * 0.4, -legLen / 2, 0);
     group.add(leg);
   });
 
-  // Pulled forward/down from the first pass, where only the support legs
-  // ended up in frame — the belt bed itself needs to actually be visible,
-  // tipping down into the pit, for the "conveyor feeding the pit" read.
-  group.position.set(-0.3, 2.55, -2.1);
-  group.rotation.x = -0.62; // tips down toward the pit
-  group.rotation.y = 0.1;
-  scene.add(group);
-
-  // World-space position of the belt's low (downhill) end — new filler
-  // tiles spawn from here so they visibly tumble off the belt into the
-  // pile instead of just appearing out of nowhere.
-  group.updateMatrixWorld(true);
-  const worldDrop = new THREE.Vector3(0, 0.12, bedLen * 0.42);
-  group.localToWorld(worldDrop);
-
-  return { group, beltSurface, stripeTex, dropPoint: worldDrop };
+  return { group, beltSurface, stripeTex, top: RAMP_TOP.clone(), bottom: RAMP_BOTTOM.clone(), dropPoint: RAMP_BOTTOM.clone() };
 }
 const feedConveyor = buildFeedConveyor();
+
+// Tiles actively riding the belt down from RAMP_TOP to RAMP_BOTTOM before
+// being released into the physics pile — see Game.prototype.spawnDripTile
+// and the ridingDrips update block in frame().
+const ridingDrips = [];
 
 function applyGraphicsQuality() {
   const q = SAVE.settings.quality || "auto";
@@ -510,10 +569,12 @@ function setHintVisual(entity, on) {
   const mats = Array.isArray(entity.mesh.material) ? entity.mesh.material : [entity.mesh.material];
   mats.forEach((m) => {
     if (!m.emissive) return;
-    // Subtle — a faint warm glow, not a neon highlight. Dialled down from
-    // an earlier pass that ran far too bright against the dark metal.
-    m.emissive.setHex(on ? 0xb5651d : 0x000000);
-    m.emissiveIntensity = on ? 0.14 : 0;
+    // Re-tuned a second time: 0.45 was "way too bright", but the follow-up
+    // 0.14 dimmed it into invisibility ("no hints at all"). Settling on a
+    // brighter warm amber at a still-modest intensity — noticeable as a
+    // "this one glows a little" cue without lighting up the whole pit.
+    m.emissive.setHex(on ? 0xd88a2e : 0x000000);
+    m.emissiveIntensity = on ? 0.28 : 0;
   });
 }
 function retextureEntity(entity) {
@@ -570,8 +631,10 @@ Game.prototype.startHaul = function (level, mode) {
   this.combo = 0; this.bestCombo = 0;
   this.rng = mulberry32(((Date.now() >>> 0) ^ (this.level * 2654435761)) >>> 0);
   this.cfg = levelConfig(this.level, SAVE.settings.startDiff);
-  this.targets = chooseTargetWords(this.rng, this.cfg).map((w) => ({ word: w, done: false }));
-  this.beltSlotCount = Math.max(6, this.cfg.maxLen);
+  // One target word per level — the belt is sized to exactly its length,
+  // so there's never a "maybe 4 or maybe 5 letters" ambiguity.
+  this.targets = [{ word: chooseTargetWord(this.rng, this.cfg), done: false }];
+  this.beltSlotCount = this.cfg.wordLen;
   this.belt = new Array(this.beltSlotCount).fill(null);
   this.magnets = (this.magnets || 0) + this.cfg.magnetsAwarded;
   if (this.level === 1 && this.mode === "haul") this.magnets = this.cfg.magnetsAwarded;
@@ -637,11 +700,15 @@ Game.prototype.spawnDripTile = function () {
   } else {
     letter = LETTER_FREQ[Math.floor(Math.random() * LETTER_FREQ.length)];
   }
-  const drop = feedConveyor.dropPoint;
-  const p = { x: drop.x + (Math.random() - 0.5) * 0.5, y: drop.y, z: drop.z + (Math.random() - 0.5) * 0.3 };
-  const vel = { x: (Math.random() - 0.5) * 0.5, y: -0.6, z: -1.6 - Math.random() * 0.6 }; // tumbling off the belt, downhill into the pit
+  // Spawn at the belt's top and RIDE it down as a kinematic body — the
+  // visible conveyor and the actual gameplay feed are now the same object,
+  // rather than a decorative belt plus tiles that just appear at its foot.
+  const top = feedConveyor.top;
+  const spawnP = { x: top.x + (Math.random() - 0.5) * 0.4, y: top.y + 0.2, z: top.z + (Math.random() - 0.5) * 0.3 };
   const variant = pickTileVariant();
-  pileWorld.spawnTile(letter, p, getLetterTexture, vel, variant, tileMaterialProps(variant));
+  const entity = pileWorld.spawnTile(letter, spawnP, getLetterTexture, { x: 0, y: 0, z: 0 }, variant, tileMaterialProps(variant));
+  pileWorld.setHeld(entity, true);
+  ridingDrips.push({ entity, t: 0, duration: 1.1 + Math.random() * 0.4, lane: (Math.random() - 0.5) * 0.4 });
   this.applyHints();
 };
 Game.prototype.resetSoftTimer = function () { this.timeLeft = this.cfg.timerSeconds; };
@@ -783,7 +850,7 @@ Game.prototype.onLevelComplete = function () {
 Game.prototype.nextLevel = function () {
   const banner = document.getElementById("levelUpBanner");
   this.startHaul(this.level + 1, this.mode);
-  document.getElementById("levelUpSub").textContent = `Pile grew to ${this.cfg.pileSize} tiles · ${this.cfg.targetCount} targets`;
+  document.getElementById("levelUpSub").textContent = `Pile grew to ${this.cfg.pileSize} tiles · next word: ${this.cfg.wordLen} letters`;
   banner.classList.remove("show"); void banner.offsetWidth; banner.classList.add("show");
 };
 
@@ -1103,9 +1170,28 @@ function frame(now) {
   camera.position.set(CAM_BASE.x + ox, CAM_BASE.y + oy, CAM_BASE.z + oz);
   camera.lookAt(CAM_LOOKAT);
 
-  feedConveyor.stripeTex.offset.y -= dt * 0.9;
+  feedConveyor.stripeTex.offset.y -= dt * 1.4;
   updateDustField(dt);
   updateWeldBursts(dt);
+
+  // Advance every tile currently riding the belt down from RAMP_TOP to
+  // RAMP_BOTTOM, then release it into the pile as a normal dynamic tile
+  // with a little tumble once it reaches the bottom.
+  for (let i = ridingDrips.length - 1; i >= 0; i--) {
+    const r = ridingDrips[i];
+    if (!r.entity.body) { ridingDrips.splice(i, 1); continue; } // removed mid-ride (level reset)
+    r.t += dt / r.duration;
+    if (r.t >= 1) {
+      pileWorld.setHeld(r.entity, false);
+      r.entity.body.setLinvel({ x: r.lane * 0.6, y: -0.7, z: -1.3 - Math.random() * 0.5 }, true);
+      ridingDrips.splice(i, 1);
+      continue;
+    }
+    const x = feedConveyor.top.x + (feedConveyor.bottom.x - feedConveyor.top.x) * r.t + r.lane;
+    const y = feedConveyor.top.y + (feedConveyor.bottom.y - feedConveyor.top.y) * r.t + 0.18;
+    const z = feedConveyor.top.z + (feedConveyor.bottom.z - feedConveyor.top.z) * r.t;
+    pileWorld.dragTo(r.entity, { x, y, z });
+  }
 
   // Idle pile animation — a gentle rumble if the pile's gone untouched for
   // a while, so it's never fully static even between plays.

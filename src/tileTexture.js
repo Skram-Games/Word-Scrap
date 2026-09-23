@@ -35,9 +35,14 @@ const PALETTES = {
     rustAmount: 1.5, metalness: 0.1, roughness: 0.88
   },
   4: { // chrome/gold — rare, shiny, mostly clean, sparkle streaks
+    // Dialled back from near-mirror (0.92/0.16) which produced a hard,
+    // unstable specular highlight that "flickered badly" as the tile
+    // tumbled or the pile shook. The "shiny" read now comes from the
+    // painted sparkle-streak texture below (a fixed, stable look) rather
+    // than a real-time specular response that changes every frame.
     grad: ["#f0d68a", "#c9a24a", "#93722c"], gradCB: ["#f5e2ab", "#d6b566", "#a3823c"],
     rust: "#8a6a2a", rustDark: "#5c4418", rustCB: "#a3823c", rustDarkCB: "#75581f",
-    rustAmount: 0.15, metalness: 0.92, roughness: 0.16, sparkle: true
+    rustAmount: 0.15, metalness: 0.55, roughness: 0.34, sparkle: true
   }
 };
 function palette(variant) { return PALETTES[variant] || PALETTES[0]; }
