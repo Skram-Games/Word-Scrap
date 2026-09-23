@@ -20,6 +20,7 @@ const bootSpinner = document.querySelector(".bootSpinner");
 const bootError = document.getElementById("bootError");
 const bootErrorDetail = document.getElementById("bootErrorDetail");
 
+const BUILD_TAG = "8"; // bump this on every delivered build so cached JS can't masquerade as the new one
 let THREE, RAPIER, getLetterTexture, PileWorld, TILE_VARIANTS, tileMaterialProps;
 
 async function loadEngine() {
@@ -32,11 +33,16 @@ async function loadEngine() {
   await RAPIER.init();
 
   bootLabel.textContent = "Building world…";
-  const tileTextureMod = await import("./tileTexture.js");
+  // Cache-busting query string — browsers (and GitHub Pages) will happily
+  // keep serving a stale cached copy of these modules after a file is
+  // replaced in the repo otherwise, which has been the cause of at least
+  // one "it didn't work" report that was actually just an old build still
+  // running. Bump BUILD_TAG any time these files change.
+  const tileTextureMod = await import(`./tileTexture.js?v=${BUILD_TAG}`);
   getLetterTexture = tileTextureMod.getLetterTexture;
   TILE_VARIANTS = tileTextureMod.TILE_VARIANTS;
   tileMaterialProps = tileTextureMod.tileMaterialProps;
-  ({ PileWorld } = await import("./pileWorld.js"));
+  ({ PileWorld } = await import(`./pileWorld.js?v=${BUILD_TAG}`));
 
   if (!window.WS_TIER1 || !window.WS_TIER2) {
     throw new Error("wordskrap-data.js failed to load — keep it in the same folder as index.html.");
@@ -233,7 +239,7 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 if ("outputColorSpace" in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-const hemi = new THREE.HemisphereLight(0xfff2d8, 0x2a1810, 0.7);
+const hemi = new THREE.HemisphereLight(0xfff2d8, 0x2a1810, 0.85);
 scene.add(hemi);
 const dirLight = new THREE.DirectionalLight(0xffdca8, 1.15);
 dirLight.position.set(4, 8, 3);
@@ -249,8 +255,14 @@ scene.add(fillLight);
 // A focused spot aimed straight down into the pit — the pile's middle was
 // reading flat under just the two directional lights, "a bowl of cereal"
 // as described. This gives the tiles real shadow/depth in the center.
-const pitSpot = new THREE.SpotLight(0xffe3b0, 2.2, 15, Math.PI / 4.2, 0.55, 1.3);
-pitSpot.position.set(0.4, 7.2, 1.8);
+// Widened and softened from the original tight cone — a narrow, hard-edged
+// spotlight pool on the ground creates its own visible circular boundary
+// (a bright disc against a darker surround) even with no "bowl" geometry
+// drawn at all, which is exactly the leftover "pit" look reported after
+// the container mesh was removed. A wide, soft-edged cone plus a touch
+// more ambient fill keeps the pile well-lit without drawing a ring.
+const pitSpot = new THREE.SpotLight(0xffe3b0, 1.6, 20, Math.PI / 2.4, 0.95, 1.1);
+pitSpot.position.set(0.4, 8.4, 2.6);
 pitSpot.target.position.set(0, 0.1, 0);
 scene.add(pitSpot);
 scene.add(pitSpot.target);
@@ -711,7 +723,7 @@ function Game() {
   // something to dig through rather than the pit draining down to just
   // the letters you need.
   this.dripAccum = 0;
-  this.dripInterval = 4.5 + Math.random() * 2.5;
+  this.dripInterval = 10 + Math.random() * 6;
   this.fillerCap = 24;
 }
 Game.prototype.startHaul = function (level, mode) {
@@ -733,7 +745,7 @@ Game.prototype.startHaul = function (level, mode) {
   this.timeLeft = this.cfg.timerSeconds;
   this.fillerCap = clamp(this.cfg.pileSize + 14, 24, 60);
   this.dripAccum = 0;
-  this.dripInterval = 4.5 + Math.random() * 2.5;
+  this.dripInterval = 10 + Math.random() * 6;
 
   // clear last level's tiles out of the physics world before spawning new ones
   pileWorld.entities.slice().forEach((e) => pileWorld.removeTile(e));
@@ -773,7 +785,7 @@ Game.prototype.tick = function (dt) {
   this.dripAccum += dt;
   if (this.dripAccum >= this.dripInterval) {
     this.dripAccum = 0;
-    this.dripInterval = 4.5 + Math.random() * 2.5;
+    this.dripInterval = 10 + Math.random() * 6;
     this.spawnDripBatch();
   }
 };
@@ -979,22 +991,52 @@ function onPointerDown(e) {
     if (canvas.setPointerCapture) { try { canvas.setPointerCapture(e.pointerId); } catch (err) { } }
   }
 }
+const discardZoneEl = document.getElementById("discardZone");
+function inRect(x, y, rect, pad) {
+  return x > rect.left - pad && x < rect.right + pad && y > rect.top - pad && y < rect.bottom + pad;
+}
 function onPointerMove(e) {
   if (!dragEntity) return;
   e.preventDefault();
   const n = toNDC(e.clientX, e.clientY);
   const pt = pileWorld.raycastDragPlane(n, camera, raycaster, dragPlaneY);
   if (pt) pileWorld.dragTo(dragEntity, pt);
+  if (discardZoneEl) {
+    const over = inRect(e.clientX, e.clientY, discardZoneEl.getBoundingClientRect(), 12);
+    discardZoneEl.classList.toggle("dragOver", over);
+  }
 }
 function onPointerUp(e) {
   if (!dragEntity) return;
-  const beltRect = document.getElementById("belt").getBoundingClientRect();
-  const inBelt = e.clientX > beltRect.left - 10 && e.clientX < beltRect.right + 10 &&
-                 e.clientY > beltRect.top - 16 && e.clientY < beltRect.bottom + 16;
   const entity = dragEntity;
   dragEntity = null;
+
+  // Discard zone takes priority — drag a tile there to scrap it out of the
+  // pile entirely, freeing up room instead of it just piling up forever.
+  if (discardZoneEl) {
+    discardZoneEl.classList.remove("dragOver");
+    if (inRect(e.clientX, e.clientY, discardZoneEl.getBoundingClientRect(), 12)) {
+      pileWorld.setHeld(entity, false);
+      pileWorld.removeTile(entity);
+      Sound.click();
+      showToast("SCRAPPED", "#ff8b7a");
+      game.applyHints();
+      return;
+    }
+  }
+
+  const beltRect = document.getElementById("belt").getBoundingClientRect();
+  const inBelt = inRect(e.clientX, e.clientY, beltRect, 10);
   if (inBelt) {
-    game.placeOnBelt(entity, null);
+    // Drop it in the SPECIFIC slot under the pointer, not just "first empty
+    // one" — line up which slot element the release point actually landed
+    // over so the player can build the word in whatever order they want.
+    let slotIndex = null;
+    const slotEls = document.querySelectorAll("#belt .beltSlot");
+    for (let i = 0; i < slotEls.length; i++) {
+      if (inRect(e.clientX, e.clientY, slotEls[i].getBoundingClientRect(), 4)) { slotIndex = i; break; }
+    }
+    game.placeOnBelt(entity, slotIndex);
   } else {
     entity.held = false;
     pileWorld.setHeld(entity, false); // drop it where it was dragged, physics takes over
@@ -1034,10 +1076,12 @@ function renderBelt(g) {
     slot.className = "beltSlot" + (g.belt[i] ? " filled" : "");
     slot.dataset.idx = i;
     if (g.belt[i]) {
-      slot.style.background = "linear-gradient(180deg, var(--copper-400), var(--copper-500))";
-      slot.style.color = "#2a1810";
+      // green LCD digit look — matches the console screen the tray now sits on
+      slot.style.color = "#baffcf";
+      slot.style.textShadow = "0 0 8px rgba(125,255,160,0.85), 0 0 2px rgba(125,255,160,1)";
       slot.style.fontWeight = "800";
-      slot.style.fontSize = "18px";
+      slot.style.fontFamily = '"Courier New", monospace';
+      slot.style.fontSize = "20px";
       slot.textContent = g.belt[i].letter;
     }
     belt.appendChild(slot);

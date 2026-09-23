@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Word Skrap</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=8">
 
 <!--
   Word Skrap — 3D build
@@ -77,6 +77,11 @@
 
   <!-- ===== Belt ===== -->
   <div id="beltWrap"><div id="belt"></div></div>
+
+  <!-- ===== Discard zone — drag an unwanted tile here to scrap it ===== -->
+  <div id="discardZone" title="Drag here to scrap a tile">
+    <svg viewBox="0 0 24 24" fill="none" stroke="#f4ead9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></svg>
+  </div>
 
   <!-- ===== Actions ===== -->
   <div id="actionRow">
@@ -245,6 +250,6 @@
      load — no reason to route ~700KB of word arrays through the module
      graph. Must be loaded before src/main.js. -->
 <script src="wordskrap-data.js"></script>
-<script type="module" src="src/main.js"></script>
+<script type="module" src="src/main.js?v=8"></script>
 </body>
 </html>
