@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Word Skrap</title>
+<link rel="stylesheet" href="style.css">
+
+<!--
+  Word Skrap — 3D build
+  ======================
+  Real physics: Three.js (rendering) + Rapier (WASM physics) driving the
+  tumbling junk pile, loaded as ES modules from jsDelivr — no bundler, no
+  build step, so this repo runs on GitHub Pages exactly as-is.
+
+  IMPORTANT — this needs a real HTTP(S) server, not a double-clicked file:
+  ES module imports are blocked under file:// by browser CORS rules. Serve
+  it locally (`npx serve .` / `python3 -m http.server`) or push to GitHub
+  Pages. This is a hard requirement of the module system, not a bug.
+
+  Pinned versions below on purpose — an unpinned "latest" CDN import is the
+  kind of thing that silently breaks a shipped TWA build months later when
+  upstream cuts a breaking release. Bump these deliberately, test, then
+  commit the bump as its own change.
+-->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+    "rapier3d-compat": "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.14.0/rapier.es.js"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app">
+<div id="gameRoot">
+  <canvas id="glCanvas"></canvas>
+
+  <div id="bootOverlay">
+    <div class="bootSpinner"></div>
+    <div id="bootLabel">Loading physics engine…</div>
+    <div id="bootError">
+      <b>Word Skrap couldn’t start.</b> Your browser may be blocking the 3D engine files (Three.js / Rapier), or there’s no internet connection right now — this game loads them from a CDN the first time it runs.
+      <code id="bootErrorDetail"></code>
+    </div>
+  </div>
+
+  <!-- ===== HUD ===== -->
+  <div id="hud">
+    <div class="hud-cluster">
+      <div class="pill" id="scorePill">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M12 2l2.4 6.6L21 10l-5 4.4L17.4 21 12 17.3 6.6 21 8 14.4 3 10l6.6-1.4L12 2z" fill="#f0a94e"/></svg>
+        <span id="scoreVal">0</span>
+      </div>
+      <div class="pill" id="levelPill">LVL <span id="levelVal">1</span></div>
+    </div>
+    <div id="integrityWrap">
+      <div id="integrityLabel"><span>Integrity</span><span id="integrityPct">100%</span></div>
+      <div id="integrityBar"><div id="integrityFill"></div></div>
+    </div>
+    <div class="hud-cluster">
+      <div class="iconBtn" id="soundBtn" title="Sound">
+        <svg id="soundIcon" viewBox="0 0 24 24" fill="none" stroke="#f4ead9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 9v6h4l5 5V4L8 9H4z"/><path d="M16 8a5 5 0 0 1 0 8"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/>
+        </svg>
+      </div>
+      <div class="iconBtn" id="pauseBtn" title="Pause">
+        <svg viewBox="0 0 24 24" fill="#f4ead9"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Target words strip ===== -->
+  <div id="targetStrip"></div>
+
+  <!-- ===== Belt ===== -->
+  <div id="beltWrap"><div id="belt"></div></div>
+
+  <!-- ===== Actions ===== -->
+  <div id="actionRow">
+    <button class="bigBtn sideBtn" id="clearBtn" title="Clear belt" style="position:relative;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#f4ead9" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>
+      Clear
+    </button>
+    <button class="bigBtn" id="weldBtn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#2a1810" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z" fill="#2a1810" stroke="none"/></svg>
+      Weld
+    </button>
+    <button class="bigBtn sideBtn" id="magnetBtn" title="Magnet" style="position:relative;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#f4ead9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4v7a6 6 0 0 0 12 0V4"/><path d="M6 4h4M14 4h4M6 8h4M14 8h4"/></svg>
+      Magnet
+      <span class="count" id="magnetCount">3</span>
+    </button>
+  </div>
+
+  <div id="toast"></div>
+  <div id="levelUpBanner"><div class="big">Level Up</div><div class="small" id="levelUpSub">Pile size increased</div></div>
+
+  <!-- ===== TITLE OVERLAY ===== -->
+  <div class="overlay" id="overlay-title">
+    <div class="panel">
+      <div class="logo">Word<br>Skrap<small>SKRAM · GAMES</small></div>
+      <div class="tagline">Scoop scrap. Sort letters. Weld words.</div>
+      <div class="statsRow">
+        <div class="statBox"><div class="num" id="bestScoreVal">0</div><div class="lbl">Best Score</div></div>
+        <div class="statBox"><div class="num" id="streakVal">0</div><div class="lbl">Day Streak</div></div>
+        <div class="statBox"><div class="num" id="wordsWeldedVal">0</div><div class="lbl">Words Welded</div></div>
+      </div>
+      <button class="menuBtn" id="btnPlayHaul">
+        <svg viewBox="0 0 24 24" fill="#2a1810"><path d="M8 5v14l11-7z"/></svg>
+        Today's Haul
+      </button>
+      <button class="menuBtn" id="btnPlayEndless">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#2a1810" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12c0-3 2-5 5-5s4 2 4 5-1 5-4 5-5-2-5-5z"/><path d="M12 12c0-3 2-5 5-5s4 2 4 5-1 5-4 5-5-2-5-5z"/></svg>
+        Endless Salvage
+      </button>
+      <button class="menuBtn ghost" id="btnHowTo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#f4ead9" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
+        How to Play
+      </button>
+      <button class="menuBtn ghost" id="btnSettingsFromTitle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#f4ead9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        Settings
+      </button>
+    </div>
+  </div>
+
+  <!-- ===== HOW TO PLAY ===== -->
+  <div class="overlay hidden" id="overlay-howto">
+    <div class="panel" style="position:relative;">
+      <div class="closeX" data-close="overlay-howto">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#f4ead9" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </div>
+      <div class="panelTitle">How to Play</div>
+      <div class="howtoStep"><div class="num">1</div><p><b>Scoop</b> letter tiles out of the junk pile and drag them onto the conveyor belt to spell a word.</p></div>
+      <div class="howtoStep"><div class="num">2</div><p><b>Reorder</b> tiles on the belt by dragging, or drop one back into the pile to swap it out.</p></div>
+      <div class="howtoStep"><div class="num">3</div><p>Hit <b>Weld</b> when you've got a real word. A valid weld clears one of your targets and scores points. A bad weld fizzles and scatters the tiles back into the pile — costing you Integrity.</p></div>
+      <div class="howtoStep"><div class="num">4</div><p>Run out of <b>Integrity</b> and the haul ends. Clear every target to advance — the pile gets bigger and trickier each level.</p></div>
+      <div class="howtoStep"><div class="num">5</div><p>Stuck? Use a <b>Magnet</b> to pull a useful tile straight out of the pile.</p></div>
+      <button class="menuBtn" data-close="overlay-howto" style="margin-top:6px;">Got it</button>
+    </div>
+  </div>
+
+  <!-- ===== SETTINGS ===== -->
+  <div class="overlay hidden" id="overlay-settings">
+    <div class="panel" style="position:relative;">
+      <div class="closeX" data-close="overlay-settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#f4ead9" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </div>
+      <div class="panelTitle">Settings</div>
+      <div class="settingRow">Sound Effects
+        <div class="switch on" id="toggleSfx"><div class="knob"></div></div>
+      </div>
+      <div class="settingRow">Music
+        <div class="switch on" id="toggleMusic"><div class="knob"></div></div>
+      </div>
+      <div class="settingRow">Screen Shake
+        <div class="switch on" id="toggleShake"><div class="knob"></div></div>
+      </div>
+      <div class="settingRow">Reduce Motion
+        <div class="switch" id="toggleReduceMotion"><div class="knob"></div></div>
+      </div>
+      <div class="settingRow">Colourblind-safe Tiles
+        <div class="switch" id="toggleColourblind"><div class="knob"></div></div>
+      </div>
+      <div class="settingRow">Graphics Quality
+        <div style="display:flex; gap:6px;">
+          <button class="diffBtn" data-quality="low" style="padding:6px 10px; font-size:10px;">Low</button>
+          <button class="diffBtn active" data-quality="auto" style="padding:6px 10px; font-size:10px;">Auto</button>
+          <button class="diffBtn" data-quality="high" style="padding:6px 10px; font-size:10px;">High</button>
+        </div>
+      </div>
+      <div class="settingRow" style="flex-direction:column; align-items:stretch; gap:10px;">
+        <div style="display:flex; justify-content:space-between;">Letter Hint Contrast <span id="hintValLabel">Medium</span></div>
+        <input type="range" min="0" max="2" value="1" step="1" class="slider" id="hintSlider" style="width:100%;">
+      </div>
+      <div class="settingRow" style="flex-direction:column; align-items:stretch; gap:8px;">
+        <div>Starting Difficulty</div>
+        <div class="difficultyRow">
+          <button class="diffBtn" data-diff="relaxed">Relaxed</button>
+          <button class="diffBtn active" data-diff="standard">Standard</button>
+          <button class="diffBtn" data-diff="scrapper">Scrapper</button>
+        </div>
+      </div>
+      <button class="menuBtn ghost" id="btnResetProgress" style="margin-top:16px; color:#f0a94e;">Reset Progress</button>
+      <button class="menuBtn" data-close="overlay-settings" style="margin-top:10px;">Done</button>
+    </div>
+  </div>
+
+  <!-- ===== PAUSE ===== -->
+  <div class="overlay hidden" id="overlay-pause">
+    <div class="panel">
+      <div class="panelTitle">Paused</div>
+      <button class="menuBtn" id="btnResume">
+        <svg viewBox="0 0 24 24" fill="#2a1810"><path d="M8 5v14l11-7z"/></svg>
+        Resume
+      </button>
+      <button class="menuBtn ghost" id="btnPauseSettings">Settings</button>
+      <button class="menuBtn ghost" id="btnPauseQuit" style="color:#e08b7a;">Quit to Menu</button>
+    </div>
+  </div>
+
+  <!-- ===== LEVEL COMPLETE ===== -->
+  <div class="overlay hidden" id="overlay-levelcomplete">
+    <div class="panel">
+      <div class="themeBadge" id="clearedTheme">SCRAP SORTED</div>
+      <div class="panelTitle">Haul Cleared!</div>
+      <div class="statsRow">
+        <div class="statBox"><div class="num" id="lcScore">0</div><div class="lbl">Score</div></div>
+        <div class="statBox"><div class="num" id="lcBestCombo">0</div><div class="lbl">Best Combo</div></div>
+      </div>
+      <button class="menuBtn" id="btnNextLevel">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#2a1810" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        Next Haul
+      </button>
+      <button class="menuBtn ghost" id="btnLcQuit">Back to Menu</button>
+    </div>
+  </div>
+
+  <!-- ===== GAME OVER ===== -->
+  <div class="overlay hidden" id="overlay-gameover">
+    <div class="panel">
+      <div class="themeBadge streakRust">STRUCTURAL FAILURE</div>
+      <div class="panelTitle">Scrapped</div>
+      <div class="statsRow">
+        <div class="statBox"><div class="num" id="goScore">0</div><div class="lbl">Final Score</div></div>
+        <div class="statBox"><div class="num" id="goLevel">1</div><div class="lbl">Level Reached</div></div>
+        <div class="statBox"><div class="num" id="goNewBest">—</div><div class="lbl">Best Score</div></div>
+      </div>
+      <button class="menuBtn" id="btnRetry">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#2a1810" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
+        Try Again
+      </button>
+      <button class="menuBtn ghost" id="btnGoQuit">Back to Menu</button>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<!-- Word data: plain global script (not a module) so it's a simple, cheap
+     load — no reason to route ~700KB of word arrays through the module
+     graph. Must be loaded before src/main.js. -->
+<script src="wordskrap-data.js"></script>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
