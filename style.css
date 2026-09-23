@@ -342,6 +342,13 @@
 
   /* ---------- 3D canvas + engine boot states ---------- */
   #glCanvas{ position:absolute; inset:0; width:100%; height:100%; display:block; touch-action:none; outline:none; }
+  /* Vignette — pulls the eye toward the pile instead of the whole scene
+     reading as one flat orange field. Sits above the canvas, below the
+     HUD/menus, and never intercepts input. */
+  #vignette{
+    position:absolute; inset:0; z-index:8; pointer-events:none;
+    background: radial-gradient(ellipse at 50% 42%, rgba(0,0,0,0) 40%, rgba(15,8,4,0.55) 100%);
+  }
   #bootOverlay{
     position:absolute; inset:0; z-index:60;
     display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px;
