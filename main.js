@@ -311,14 +311,17 @@ function buildSkylineBackdrop() {
 }
 buildSkylineBackdrop();
 
-/* ---------------------------- Scrapyard ground extension ------------------
-   The pit drum used to sit alone in a flat colour field, reading as "a bowl"
-   with nothing around it. A wide ground disc plus a scatter of low junk
-   silhouettes (crushed panels, tyres, a drum) around the rim sells "a corner
-   of a scrapyard" instead of "an object floating in space". */
+/* ---------------------------- Scrapyard ground + heaps ---------------------
+   With the pit's own drum/rim visuals removed (see pileWorld.js), the
+   clearing where tiles land needs to read as bounded by the YARD itself —
+   scrap heaps, machinery and a bit of green pressing in close around an
+   open patch — rather than by any container. Three rings: a close band of
+   junk right at the tile-physics radius (so the eye reads "that's the
+   edge"), a mid band of bigger heaps/machinery for depth, and scattered
+   weeds/plants throughout for a lived-in, non-industrial-showroom feel. */
 function buildYardGround() {
   const groundMat = new THREE.MeshStandardMaterial({ color: 0x4a3524, roughness: 0.95, metalness: 0.05 });
-  const ground = new THREE.Mesh(new THREE.CircleGeometry(16, 40), groundMat);
+  const ground = new THREE.Mesh(new THREE.CircleGeometry(18, 48), groundMat);
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = -0.05;
   ground.receiveShadow = true;
@@ -326,30 +329,111 @@ function buildYardGround() {
 
   const junkMat = new THREE.MeshStandardMaterial({ color: 0x2c2016, roughness: 0.9, metalness: 0.25 });
   const junkMat2 = new THREE.MeshStandardMaterial({ color: 0x5a3a20, roughness: 0.85, metalness: 0.15 });
-  const ringR = 5.6;
-  for (let i = 0; i < 10; i++) {
-    const ang = (i / 10) * Math.PI * 2 + 0.3;
-    const dist = ringR + Math.random() * 3.2;
-    const x = Math.cos(ang) * dist, z = Math.sin(ang) * dist;
-    if (z > -1) continue; // keep the camera-facing arc clear
+  const rustMat = new THREE.MeshStandardMaterial({ color: 0x7a4322, roughness: 0.8, metalness: 0.3 });
+  const leafMat = new THREE.MeshStandardMaterial({ color: 0x4c6b34, roughness: 0.95, metalness: 0.02 });
+  const stemMat = new THREE.MeshStandardMaterial({ color: 0x3a2f1c, roughness: 0.9, metalness: 0.05 });
+
+  function scatterPiece(x, z) {
     const kind = Math.random();
     let mesh;
-    if (kind < 0.4) {
+    if (kind < 0.3) {
       mesh = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.11, 8, 14), junkMat);
       mesh.rotation.x = Math.PI / 2;
       mesh.position.y = 0.11;
-    } else if (kind < 0.75) {
-      mesh = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.5 + Math.random() * 0.5, 0.55), Math.random() < 0.5 ? junkMat : junkMat2);
+    } else if (kind < 0.6) {
+      const h = 0.5 + Math.random() * 0.5;
+      mesh = new THREE.Mesh(new THREE.BoxGeometry(0.7, h, 0.55), Math.random() < 0.5 ? junkMat : junkMat2);
       mesh.rotation.y = Math.random() * Math.PI;
-      mesh.position.y = mesh.geometry.parameters.height / 2;
-    } else {
+      mesh.position.y = h / 2;
+    } else if (kind < 0.8) {
       mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.4, 0.9, 10), junkMat2);
       mesh.position.y = 0.45;
+    } else {
+      mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.5, 10), rustMat);
+      mesh.position.y = 0.25;
     }
     mesh.position.x = x; mesh.position.z = z;
     mesh.castShadow = true; mesh.receiveShadow = true;
     scene.add(mesh);
   }
+
+  // A rough clump of scrap-metal "weed" — three or four flat leaf-shaped
+  // planes fanned around a thin stem — pushing up between the junk, the
+  // way real reclaimed lots always have green breaking through.
+  function scatterPlant(x, z) {
+    const group = new THREE.Group();
+    const stemH = 0.35 + Math.random() * 0.35;
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.03, stemH, 5), stemMat);
+    stem.position.y = stemH / 2;
+    group.add(stem);
+    const leaves = 3 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < leaves; i++) {
+      const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.38, 4), leafMat);
+      const ang = (i / leaves) * Math.PI * 2 + Math.random() * 0.4;
+      leaf.position.set(Math.cos(ang) * 0.05, stemH * (0.5 + Math.random() * 0.5), Math.sin(ang) * 0.05);
+      leaf.rotation.z = Math.cos(ang) * 0.5;
+      leaf.rotation.x = Math.sin(ang) * 0.5;
+      group.add(leaf);
+    }
+    group.position.set(x, 0, z);
+    group.castShadow = true;
+    scene.add(group);
+  }
+
+  // Close ring — right at the physics leash radius, sells "that dark strip
+  // IS the edge of the clearing" without any drawn wall at all.
+  const CLOSE_R = 3.15;
+  for (let i = 0; i < 22; i++) {
+    const ang = (i / 22) * Math.PI * 2 + Math.random() * 0.15;
+    const dist = CLOSE_R + Math.random() * 0.6;
+    const x = Math.cos(ang) * dist, z = Math.sin(ang) * dist;
+    if (z > 0.4) continue; // keep the camera-facing near side clear so the pile stays fully visible
+    if (Math.random() < 0.3) scatterPlant(x, z); else scatterPiece(x, z);
+  }
+
+  // Mid ring — bigger heaps and simple "machinery" silhouettes for depth.
+  const ringR = 5.6;
+  for (let i = 0; i < 14; i++) {
+    const ang = (i / 14) * Math.PI * 2 + 0.2;
+    const dist = ringR + Math.random() * 3.4;
+    const x = Math.cos(ang) * dist, z = Math.sin(ang) * dist;
+    if (z > 2) continue; // keep the near camera-facing arc clear
+    if (Math.random() < 0.22) {
+      buildMachineSilhouette(x, z);
+    } else {
+      // a small heap: 3-5 overlapping pieces clustered together
+      const n = 3 + Math.floor(Math.random() * 3);
+      for (let j = 0; j < n; j++) scatterPiece(x + (Math.random() - 0.5) * 1.1, z + (Math.random() - 0.5) * 1.1);
+      if (Math.random() < 0.4) scatterPlant(x + (Math.random() - 0.5) * 1.3, z + (Math.random() - 0.5) * 1.3);
+    }
+  }
+}
+
+// A simple blocky "machine" — a crusher/press or old generator silhouette —
+// dropped at a few points in the mid-ring for visible machinery beyond the
+// crane, per the "various plant, machinery visible" brief.
+function buildMachineSilhouette(x, z) {
+  const group = new THREE.Group();
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x35291a, roughness: 0.8, metalness: 0.4 });
+  const hazardMat = new THREE.MeshStandardMaterial({ color: 0xb5651d, roughness: 0.6, metalness: 0.3 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.5, 1.1), bodyMat);
+  body.position.y = 0.75;
+  group.add(body);
+  const funnel = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.35, 0.9, 8), bodyMat);
+  funnel.position.set(0, 1.9, 0);
+  group.add(funnel);
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(1.32, 0.16, 1.12), hazardMat);
+  stripe.position.y = 1.35;
+  group.add(stripe);
+  [[-0.55, -0.45], [0.55, -0.45], [-0.55, 0.45], [0.55, 0.45]].forEach(([lx, lz]) => {
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.3, 6), bodyMat);
+    leg.position.set(lx, 0.15, lz);
+    group.add(leg);
+  });
+  group.position.set(x, 0, z);
+  group.rotation.y = Math.random() * Math.PI * 2;
+  group.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  scene.add(group);
 }
 buildYardGround();
 
@@ -388,7 +472,7 @@ const dustField = buildDustField();
    reward lands in the 3D scene instead of only ever showing up as a DOM
    toast bolted on top of it. Fired-and-forgotten: each burst removes
    itself from the scene once its lifetime is up. */
-const WELD_FX_POINT = new THREE.Vector3(0, 0.9, 2.1); // roughly where the belt overlay sits, front of the pit
+const WELD_FX_POINT = new THREE.Vector3(0, 0.9, 2.1); // front of the pit, near the weld control panel
 const activeBursts = [];
 function spawnWeldBurst() {
   const n = 22;
@@ -427,6 +511,25 @@ function updateWeldBursts(dt) {
     }
   }
 }
+// A quick flash/spark burst at the crane's grab point when it releases a
+// batch, so a drop reads as a deliberate event rather than tiles quietly
+// appearing out of nowhere.
+function spawnCraneBurst() {
+  const n = 14;
+  const positions = new Float32Array(n * 3);
+  const velocities = [];
+  for (let i = 0; i < n; i++) {
+    positions[i * 3] = DROP_POINT.x; positions[i * 3 + 1] = DROP_POINT.y; positions[i * 3 + 2] = DROP_POINT.z;
+    const ang = Math.random() * Math.PI * 2, spd = 0.4 + Math.random() * 1.1;
+    velocities.push({ x: Math.cos(ang) * spd, y: -0.5 - Math.random() * 1.5, z: Math.sin(ang) * spd });
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const mat = new THREE.PointsMaterial({ color: 0xf0a94e, size: 0.1, transparent: true, opacity: 1, depthWrite: false });
+  const points = new THREE.Points(geo, mat);
+  scene.add(points);
+  activeBursts.push({ points, velocities, age: 0, life: 0.5 });
+}
 function updateDustField(dt) {
   const pos = dustField.points.geometry.attributes.position;
   for (let i = 0; i < dustField.count; i++) {
@@ -442,81 +545,69 @@ const pileWorld = new PileWorld(THREE, RAPIER, scene, {
   radius: 3.0, wallHeight: 2.3, colourblindSafe: SAVE.settings.colourblind
 });
 
-/* ---------------------------- Feed conveyor (now load-bearing) ------------
-   Rebuilt from scratch: instead of a thin decorative box that didn't read
-   as a belt from the play camera, this is a real ramp between two explicit
-   world-space points — RAMP_TOP (origin, back near the skyline) and
-   RAMP_BOTTOM (over the pit rim) — oriented along that exact segment, with
-   a wide unlit hazard-stripe surface (MeshBasicMaterial so it's always
-   bright regardless of scene lighting/fog) and a scrolling texture to sell
-   motion. Drip-feed tiles now actually RIDE this path (see ridingDrips /
-   Game.prototype.spawnDripTile) instead of just appearing at its foot, so
-   the visible belt and the gameplay feed are the same object. */
-const RAMP_TOP = new THREE.Vector3(-1.1, 4.35, -8.4);
-const RAMP_BOTTOM = new THREE.Vector3(0.15, 1.55, -0.35);
+/* ---------------------------- Crane rig (replaces the conveyor) -----------
+   The belt is gone — letters now arrive the way the brief asked for: a
+   crane swings a grab in from above and drops a handful of fresh tiles
+   straight down into the pile at once, rather than a continuous single-file
+   drip. This is a static crane silhouette (arm + cable + open grab) parked
+   above the clearing; Game.prototype.spawnDripBatch (still driven by the
+   same accumulator/interval fields as before) spawns 3-5 tiles at once at
+   DROP_POINT with a little scatter and a real fall, and spawnWeldBurst-style
+   sparks mark the drop so it reads as an event, not a random pop-in. */
+const DROP_POINT = new THREE.Vector3(0.2, 9.4, -0.6);
 
-function buildFeedConveyor() {
-  const stripeCanvas = document.createElement("canvas");
-  stripeCanvas.width = 64; stripeCanvas.height = 64;
-  const sctx = stripeCanvas.getContext("2d");
-  sctx.fillStyle = "#161008"; sctx.fillRect(0, 0, 64, 64);
-  sctx.fillStyle = "#f0b429";
-  for (let i = -1; i < 5; i++) { sctx.save(); sctx.translate(i * 16, 0); sctx.rotate(Math.PI / 4); sctx.fillRect(-40, -40, 8, 160); sctx.restore(); }
-  const stripeTex = new THREE.CanvasTexture(stripeCanvas);
-  stripeTex.wrapS = THREE.RepeatWrapping; stripeTex.wrapT = THREE.RepeatWrapping;
-
-  const path = new THREE.Vector3().subVectors(RAMP_BOTTOM, RAMP_TOP);
-  const bedLen = path.length();
-  const bedW = 1.35;
-  const dir = path.clone().normalize();
-  const mid = new THREE.Vector3().addVectors(RAMP_TOP, RAMP_BOTTOM).multiplyScalar(0.5);
-  const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
-
+function buildCraneRig() {
   const group = new THREE.Group();
-  group.position.copy(mid);
-  group.quaternion.copy(quat);
+  const steelMat = new THREE.MeshStandardMaterial({ color: 0x3a3128, roughness: 0.6, metalness: 0.6 });
+  const hazardMat = new THREE.MeshStandardMaterial({ color: 0xd4832f, roughness: 0.55, metalness: 0.4 });
+
+  // Tower + horizontal jib, anchored back near the skyline and reaching out
+  // over the clearing to DROP_POINT.
+  const tower = new THREE.Mesh(new THREE.BoxGeometry(0.5, 10.5, 0.5), steelMat);
+  tower.position.set(-2.6, 5.25, -6.4);
+  tower.castShadow = true;
+  group.add(tower);
+
+  const jibLen = 8.4;
+  const jib = new THREE.Mesh(new THREE.BoxGeometry(jibLen, 0.42, 0.42), steelMat);
+  jib.position.set(-2.6 + jibLen * 0.42, 10.1, -6.4 + jibLen * 0.1);
+  jib.rotation.y = -0.12;
+  jib.castShadow = true;
+  group.add(jib);
+
+  const counterJib = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.4, 0.4), steelMat);
+  counterJib.position.set(-3.6, 10.1, -6.9);
+  group.add(counterJib);
+  const counterweight = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.7, 0.9), hazardMat);
+  counterweight.position.set(-4.5, 9.7, -7.1);
+  group.add(counterweight);
+
+  // Cable + open grab hanging down to DROP_POINT.
+  const cableMat = new THREE.MeshBasicMaterial({ color: 0x18120b, fog: false });
+  const cableLen = 10.1 - DROP_POINT.y + 0.6;
+  const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, cableLen, 6), cableMat);
+  cable.position.set(DROP_POINT.x, DROP_POINT.y + cableLen / 2, DROP_POINT.z);
+  group.add(cable);
+
+  const grabMat = new THREE.MeshStandardMaterial({ color: 0x22190f, roughness: 0.7, metalness: 0.55 });
+  const grabGroup = new THREE.Group();
+  grabGroup.position.set(DROP_POINT.x, DROP_POINT.y + 0.3, DROP_POINT.z);
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.2, 10), grabMat);
+  grabGroup.add(hub);
+  for (let i = 0; i < 4; i++) {
+    const ang = (i / 4) * Math.PI * 2;
+    const claw = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.55, 6), grabMat);
+    claw.position.set(Math.cos(ang) * 0.18, -0.32, Math.sin(ang) * 0.18);
+    claw.rotation.x = Math.cos(ang) * 0.5;
+    claw.rotation.z = Math.sin(ang) * -0.5;
+    grabGroup.add(claw);
+  }
+  group.add(grabGroup);
+
   scene.add(group);
-
-  stripeTex.repeat.set(2, bedLen * 1.6);
-  const bedMat = new THREE.MeshStandardMaterial({ color: 0x2a2015, roughness: 0.85, metalness: 0.35 });
-  const bed = new THREE.Mesh(new THREE.BoxGeometry(bedW, bedLen, 0.22), bedMat);
-  bed.rotation.x = Math.PI / 2;
-  bed.castShadow = true; bed.receiveShadow = true;
-  group.add(bed);
-
-  // Unlit stripe surface — guaranteed bright/visible however the scene is lit.
-  const beltMat = new THREE.MeshBasicMaterial({ map: stripeTex, fog: false });
-  const beltSurface = new THREE.Mesh(new THREE.BoxGeometry(bedW * 0.82, bedLen * 0.97, 0.02), beltMat);
-  beltSurface.rotation.x = Math.PI / 2;
-  beltSurface.position.y = 0.12;
-  group.add(beltSurface);
-
-  // Guardrails down both edges — reads as a belt silhouette even at a glance.
-  const railMat = new THREE.MeshStandardMaterial({ color: 0x6b4423, roughness: 0.7, metalness: 0.5 });
-  [-1, 1].forEach((side) => {
-    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.06, bedLen, 0.16), railMat);
-    rail.rotation.x = Math.PI / 2;
-    rail.position.set(side * bedW * 0.44, 0.16, 0);
-    group.add(rail);
-  });
-
-  // Support legs down to the ground under the belt's midpoint.
-  const legMat = new THREE.MeshStandardMaterial({ color: 0x241a10, roughness: 0.85, metalness: 0.4 });
-  [-1, 1].forEach((side) => {
-    const legLen = Math.max(0.4, mid.y - 0.1);
-    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, legLen, 8), legMat);
-    leg.position.set(side * bedW * 0.4, -legLen / 2, 0);
-    group.add(leg);
-  });
-
-  return { group, beltSurface, stripeTex, top: RAMP_TOP.clone(), bottom: RAMP_BOTTOM.clone(), dropPoint: RAMP_BOTTOM.clone() };
+  return { group, grabGroup, jib };
 }
-const feedConveyor = buildFeedConveyor();
-
-// Tiles actively riding the belt down from RAMP_TOP to RAMP_BOTTOM before
-// being released into the physics pile — see Game.prototype.spawnDripTile
-// and the ridingDrips update block in frame().
-const ridingDrips = [];
+const craneRig = buildCraneRig();
 
 function applyGraphicsQuality() {
   const q = SAVE.settings.quality || "auto";
@@ -615,12 +706,12 @@ function Game() {
   this.beltSlotCount = 8;
   this.timeLeft = null;
   this.shakeT = 0;
-  // Sieve mechanic: a slow, continuous drip of filler tiles off the
-  // conveyor into the pile, mostly irrelevant letters so there's always
+  // Sieve mechanic: every so often the crane drops a handful of filler
+  // tiles into the pile, mostly irrelevant letters so there's always
   // something to dig through rather than the pit draining down to just
   // the letters you need.
   this.dripAccum = 0;
-  this.dripInterval = 2 + Math.random() * 1.5;
+  this.dripInterval = 4.5 + Math.random() * 2.5;
   this.fillerCap = 24;
 }
 Game.prototype.startHaul = function (level, mode) {
@@ -640,9 +731,9 @@ Game.prototype.startHaul = function (level, mode) {
   this.magnets = (this.magnets || 0) + this.cfg.magnetsAwarded;
   if (this.level === 1 && this.mode === "haul") this.magnets = this.cfg.magnetsAwarded;
   this.timeLeft = this.cfg.timerSeconds;
-  this.fillerCap = clamp(this.cfg.pileSize + 14, 24, 46);
+  this.fillerCap = clamp(this.cfg.pileSize + 14, 24, 60);
   this.dripAccum = 0;
-  this.dripInterval = 1.8 + Math.random() * 1.6;
+  this.dripInterval = 4.5 + Math.random() * 2.5;
 
   // clear last level's tiles out of the physics world before spawning new ones
   pileWorld.entities.slice().forEach((e) => pileWorld.removeTile(e));
@@ -682,34 +773,38 @@ Game.prototype.tick = function (dt) {
   this.dripAccum += dt;
   if (this.dripAccum >= this.dripInterval) {
     this.dripAccum = 0;
-    this.dripInterval = 1.8 + Math.random() * 1.6;
-    this.spawnDripTile();
+    this.dripInterval = 4.5 + Math.random() * 2.5;
+    this.spawnDripBatch();
   }
 };
-Game.prototype.spawnDripTile = function () {
-  const alive = pileWorld.entities.filter((e) => !e.onBelt).length;
+// The crane swings over and drops a HANDFUL of fresh tiles at once, rather
+// than a continuous single-file drip — matches "a handful at a time" and
+// reads as a real event (crane grab flash + a little scatter/thud) instead
+// of a steady trickle nobody notices.
+Game.prototype.spawnDripBatch = function () {
+  const alive = pileWorld.entities.length;
   if (alive >= this.fillerCap) return;
-  let letter;
-  if (Math.random() < 0.15) {
-    // Mostly noise, but not ONLY noise — every so often the belt drops
-    // something you actually need, so digging through the junk pays off
-    // rather than the drip just diluting the pile forever.
-    const need = {};
-    this.targets.filter((t) => !t.done).forEach((t) => t.word.split("").forEach((ch) => (need[ch] = (need[ch] || 0) + 1)));
-    const needed = Object.keys(need).filter((ch) => need[ch] > 0);
-    letter = needed.length ? needed[Math.floor(Math.random() * needed.length)] : LETTER_FREQ[Math.floor(Math.random() * LETTER_FREQ.length)];
-  } else {
-    letter = LETTER_FREQ[Math.floor(Math.random() * LETTER_FREQ.length)];
+  const batchSize = Math.min(3 + Math.floor(Math.random() * 3), this.fillerCap - alive);
+  if (batchSize <= 0) return;
+  const need = {};
+  this.targets.filter((t) => !t.done).forEach((t) => t.word.split("").forEach((ch) => (need[ch] = (need[ch] || 0) + 1)));
+  const needed = Object.keys(need).filter((ch) => need[ch] > 0);
+  for (let i = 0; i < batchSize; i++) {
+    // Mostly noise, but not ONLY noise — every so often the crane drops
+    // something you actually need, so digging through the junk pays off.
+    const letter = (Math.random() < 0.2 && needed.length)
+      ? needed[Math.floor(Math.random() * needed.length)]
+      : LETTER_FREQ[Math.floor(Math.random() * LETTER_FREQ.length)];
+    const spawnP = {
+      x: DROP_POINT.x + (Math.random() - 0.5) * 1.1,
+      y: DROP_POINT.y + Math.random() * 0.6,
+      z: DROP_POINT.z + (Math.random() - 0.5) * 1.1,
+    };
+    const vel = { x: (Math.random() - 0.5) * 0.6, y: -1 - Math.random(), z: (Math.random() - 0.5) * 0.6 };
+    const variant = pickTileVariant();
+    pileWorld.spawnTile(letter, spawnP, getLetterTexture, vel, variant, tileMaterialProps(variant));
   }
-  // Spawn at the belt's top and RIDE it down as a kinematic body — the
-  // visible conveyor and the actual gameplay feed are now the same object,
-  // rather than a decorative belt plus tiles that just appear at its foot.
-  const top = feedConveyor.top;
-  const spawnP = { x: top.x + (Math.random() - 0.5) * 0.4, y: top.y + 0.2, z: top.z + (Math.random() - 0.5) * 0.3 };
-  const variant = pickTileVariant();
-  const entity = pileWorld.spawnTile(letter, spawnP, getLetterTexture, { x: 0, y: 0, z: 0 }, variant, tileMaterialProps(variant));
-  pileWorld.setHeld(entity, true);
-  ridingDrips.push({ entity, t: 0, duration: 1.1 + Math.random() * 0.4, lane: (Math.random() - 0.5) * 0.4 });
+  spawnCraneBurst();
   this.applyHints();
 };
 Game.prototype.resetSoftTimer = function () { this.timeLeft = this.cfg.timerSeconds; };
@@ -1180,28 +1275,8 @@ function frame(now) {
   camera.position.set(CAM_BASE.x + ox, CAM_BASE.y + oy, CAM_BASE.z + oz);
   camera.lookAt(CAM_LOOKAT);
 
-  feedConveyor.stripeTex.offset.y -= dt * 1.4;
   updateDustField(dt);
   updateWeldBursts(dt);
-
-  // Advance every tile currently riding the belt down from RAMP_TOP to
-  // RAMP_BOTTOM, then release it into the pile as a normal dynamic tile
-  // with a little tumble once it reaches the bottom.
-  for (let i = ridingDrips.length - 1; i >= 0; i--) {
-    const r = ridingDrips[i];
-    if (!r.entity.body) { ridingDrips.splice(i, 1); continue; } // removed mid-ride (level reset)
-    r.t += dt / r.duration;
-    if (r.t >= 1) {
-      pileWorld.setHeld(r.entity, false);
-      r.entity.body.setLinvel({ x: r.lane * 0.6, y: -0.7, z: -1.3 - Math.random() * 0.5 }, true);
-      ridingDrips.splice(i, 1);
-      continue;
-    }
-    const x = feedConveyor.top.x + (feedConveyor.bottom.x - feedConveyor.top.x) * r.t + r.lane;
-    const y = feedConveyor.top.y + (feedConveyor.bottom.y - feedConveyor.top.y) * r.t + 0.18;
-    const z = feedConveyor.top.z + (feedConveyor.bottom.z - feedConveyor.top.z) * r.t;
-    pileWorld.dragTo(r.entity, { x, y, z });
-  }
 
   // Idle pile animation — a gentle rumble if the pile's gone untouched for
   // a while, so it's never fully static even between plays.
