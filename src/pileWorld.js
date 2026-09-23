@@ -92,26 +92,16 @@ export class PileWorld {
       );
     }
 
-    // --- visuals: a simple metal drum (floor disc + open-top tube) ---
-    const drumMat = new THREE.MeshStandardMaterial({ color: 0x3a2c1f, roughness: 0.85, metalness: 0.35, side: THREE.DoubleSide });
-    const floorMesh = new THREE.Mesh(new THREE.CylinderGeometry(radius + 0.3, radius + 0.3, floorThickness, 40), drumMat);
-    floorMesh.position.set(0, -floorThickness / 2, 0);
-    floorMesh.receiveShadow = true;
-    this._group.add(floorMesh);
-
-    const wallGeo = new THREE.CylinderGeometry(radius + 0.02, radius + 0.02, wallHeight, 40, 1, true);
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0x2e2114, roughness: 0.9, metalness: 0.25, side: THREE.BackSide });
-    const wallMesh = new THREE.Mesh(wallGeo, wallMat);
-    wallMesh.position.set(0, wallHeight / 2, 0);
-    this._group.add(wallMesh);
-
-    // rim highlight so the open top edge reads clearly against the pile
-    const rimGeo = new THREE.TorusGeometry(radius + 0.02, 0.05, 8, 48);
-    const rimMat = new THREE.MeshStandardMaterial({ color: 0xd4832f, roughness: 0.5, metalness: 0.6 });
-    const rimMesh = new THREE.Mesh(rimGeo, rimMat);
-    rimMesh.rotation.x = Math.PI / 2;
-    rimMesh.position.set(0, wallHeight, 0);
-    this._group.add(rimMesh);
+    // --- visuals: NONE ---
+    // Earlier builds rendered this container as a literal metal drum (floor
+    // disc + tube wall + a bright rim ring), which is exactly the "bowl"
+    // read the design wants gone. The containment is still real physics
+    // (the floor + ring-of-walls colliders above are unchanged and still
+    // keep tiles from spilling out), it's just not drawn — the ground
+    // plane and scrap-heap dressing built around the clearing in main.js's
+    // buildYardGround()/buildScrapHeaps() now do the job of visually
+    // bounding the play area, so tiles read as sitting in an open patch of
+    // yard, not inside a container.
   }
 
   /** Random point near the top-center of the drum, for spawning/scattering. */
