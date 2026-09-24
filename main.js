@@ -20,7 +20,7 @@ const bootSpinner = document.querySelector(".bootSpinner");
 const bootError = document.getElementById("bootError");
 const bootErrorDetail = document.getElementById("bootErrorDetail");
 
-const BUILD_TAG = "8"; // bump this on every delivered build so cached JS can't masquerade as the new one
+const BUILD_TAG = "9"; // bump this on every delivered build so cached JS can't masquerade as the new one
 let THREE, RAPIER, getLetterTexture, PileWorld, TILE_VARIANTS, tileMaterialProps;
 
 async function loadEngine() {
@@ -570,54 +570,83 @@ const DROP_POINT = new THREE.Vector3(0.2, 9.4, -0.6);
 
 function buildCraneRig() {
   const group = new THREE.Group();
-  const steelMat = new THREE.MeshStandardMaterial({ color: 0x3a3128, roughness: 0.6, metalness: 0.6 });
-  const hazardMat = new THREE.MeshStandardMaterial({ color: 0xd4832f, roughness: 0.55, metalness: 0.4 });
+  // A single solid box for the jib is exactly what a belt BED looks like —
+  // that's almost certainly what was being read as "a conveyor with
+  // triangles on it" (the claws below). Repainted unmistakable
+  // construction-crane yellow/black, and the jib is now an open lattice
+  // (top+bottom rail plus diagonal struts) instead of a flat plank, so the
+  // silhouette reads as a truss, not a belt bed.
+  const craneMat = new THREE.MeshStandardMaterial({ color: 0xe8b023, roughness: 0.55, metalness: 0.4 });
+  const blackMat = new THREE.MeshStandardMaterial({ color: 0x1c1712, roughness: 0.6, metalness: 0.5 });
 
-  // Tower + horizontal jib, anchored back near the skyline and reaching out
-  // over the clearing to DROP_POINT.
-  const tower = new THREE.Mesh(new THREE.BoxGeometry(0.5, 10.5, 0.5), steelMat);
+  const tower = new THREE.Mesh(new THREE.BoxGeometry(0.5, 10.5, 0.5), craneMat);
   tower.position.set(-2.6, 5.25, -6.4);
   tower.castShadow = true;
   group.add(tower);
+  const towerCap = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.25, 0.56), blackMat);
+  towerCap.position.set(-2.6, 10.5, -6.4);
+  group.add(towerCap);
 
+  // Jib as an open lattice truss: two thin rails + diagonal struts, built
+  // along a local axis then rotated into place — reads as scaffolding you
+  // can see through, never as a solid deck.
   const jibLen = 8.4;
-  const jib = new THREE.Mesh(new THREE.BoxGeometry(jibLen, 0.42, 0.42), steelMat);
-  jib.position.set(-2.6 + jibLen * 0.42, 10.1, -6.4 + jibLen * 0.1);
-  jib.rotation.y = -0.12;
-  jib.castShadow = true;
-  group.add(jib);
+  const jibGroup = new THREE.Group();
+  const railTop = new THREE.Mesh(new THREE.BoxGeometry(jibLen, 0.1, 0.1), craneMat);
+  railTop.position.y = 0.22;
+  jibGroup.add(railTop);
+  const railBottom = new THREE.Mesh(new THREE.BoxGeometry(jibLen, 0.1, 0.1), craneMat);
+  railBottom.position.y = -0.22;
+  jibGroup.add(railBottom);
+  const strutCount = 9;
+  for (let i = 0; i < strutCount; i++) {
+    const sx = -jibLen / 2 + (i / (strutCount - 1)) * jibLen;
+    const strut = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.5, 0.07), i % 2 === 0 ? blackMat : craneMat);
+    strut.position.set(sx, 0, 0);
+    strut.rotation.z = (i % 2 === 0 ? 1 : -1) * 0.5;
+    jibGroup.add(strut);
+  }
+  jibGroup.position.set(-2.6 + jibLen * 0.42, 10.1, -6.4 + jibLen * 0.1);
+  jibGroup.rotation.y = -0.12;
+  jibGroup.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  group.add(jibGroup);
 
-  const counterJib = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.4, 0.4), steelMat);
+  const counterJib = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.4, 0.4), craneMat);
   counterJib.position.set(-3.6, 10.1, -6.9);
   group.add(counterJib);
-  const counterweight = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.7, 0.9), hazardMat);
+  const counterweight = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.7, 0.9), blackMat);
   counterweight.position.set(-4.5, 9.7, -7.1);
   group.add(counterweight);
 
-  // Cable + open grab hanging down to DROP_POINT.
+  // Cable + a clearer hook-and-jaw grab hanging down to DROP_POINT — a
+  // single curved hook plus two angled jaws reads unambiguously as "crane
+  // grab", instead of the four loose cone "claws" that were being
+  // mistaken for triangles painted on a belt.
   const cableMat = new THREE.MeshBasicMaterial({ color: 0x18120b, fog: false });
   const cableLen = 10.1 - DROP_POINT.y + 0.6;
   const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, cableLen, 6), cableMat);
   cable.position.set(DROP_POINT.x, DROP_POINT.y + cableLen / 2, DROP_POINT.z);
   group.add(cable);
 
-  const grabMat = new THREE.MeshStandardMaterial({ color: 0x22190f, roughness: 0.7, metalness: 0.55 });
+  const grabMat = new THREE.MeshStandardMaterial({ color: 0x2a2018, roughness: 0.6, metalness: 0.6 });
   const grabGroup = new THREE.Group();
   grabGroup.position.set(DROP_POINT.x, DROP_POINT.y + 0.3, DROP_POINT.z);
-  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.2, 10), grabMat);
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.22, 10), grabMat);
   grabGroup.add(hub);
-  for (let i = 0; i < 4; i++) {
-    const ang = (i / 4) * Math.PI * 2;
-    const claw = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.55, 6), grabMat);
-    claw.position.set(Math.cos(ang) * 0.18, -0.32, Math.sin(ang) * 0.18);
-    claw.rotation.x = Math.cos(ang) * 0.5;
-    claw.rotation.z = Math.sin(ang) * -0.5;
-    grabGroup.add(claw);
-  }
+  const hook = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.045, 8, 16, Math.PI * 1.3), grabMat);
+  hook.position.y = -0.28;
+  hook.rotation.z = Math.PI * 0.65;
+  grabGroup.add(hook);
+  [-1, 1].forEach((side) => {
+    const jaw = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.42, 0.1), grabMat);
+    jaw.position.set(side * 0.14, -0.42, 0);
+    jaw.rotation.z = side * 0.35;
+    grabGroup.add(jaw);
+  });
   group.add(grabGroup);
 
   scene.add(group);
-  return { group, grabGroup, jib };
+  return { group, grabGroup, jibGroup };
 }
 const craneRig = buildCraneRig();
 
